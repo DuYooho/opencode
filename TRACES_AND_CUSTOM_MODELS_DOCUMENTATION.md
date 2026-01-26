@@ -29,9 +29,9 @@ OpenCode supports multiple ways to export session data for analysis, sharing, or
 **位置 / Location**: `/packages/opencode/src/cli/cmd/export.ts`
 
 **功能描述 / Description**:
-将会话数据导出为 JSON 格式，包含完整的会话信息和所有消息。
+将会话数据导出为 JSON 格式，包含完整的会话信息、所有消息、系统提示词、工具定义、模型配置和完整的调用链路。
 
-Exports session data as JSON format, including complete session information and all messages.
+Exports session data as JSON format, including complete session information, all messages, system prompts, tool definitions, model configuration, and full call chain.
 
 **使用方法 / Usage**:
 
@@ -41,9 +41,12 @@ opencode export
 
 # 直接导出特定会话
 opencode export <session-id>
+
+# 导出到文件
+opencode export <session-id> > session-export.json
 ```
 
-**导出数据结构 / Export Data Structure**:
+**完整导出数据结构 / Complete Export Data Structure**:
 
 ```json
 {
@@ -53,6 +56,12 @@ opencode export <session-id>
     "time": {
       "created": 1234567890,
       "updated": 1234567890
+    },
+    "directory": "/path/to/project",
+    "projectID": "project_xxx",
+    "parentID": "parent_session_xxx",  // 如果是子会话
+    "permission": {                     // 权限配置
+      // ... 权限规则
     }
     // ... 其他会话信息
   },
@@ -62,6 +71,23 @@ opencode export <session-id>
         "role": "user" | "assistant",
         "id": "message_xxx",
         "sessionID": "session_xxx",
+        "modelID": "claude-sonnet-4-5",
+        "providerID": "anthropic",
+        "agent": "build",
+        "tokens": {
+          "input": 1000,
+          "output": 500,
+          "reasoning": 200,
+          "cache": {
+            "read": 500,
+            "write": 100
+          }
+        },
+        "cost": 0.05,
+        "time": {
+          "created": 1234567890,
+          "completed": 1234567900
+        }
         // ... 消息元信息
       },
       "parts": [
@@ -71,7 +97,100 @@ opencode export <session-id>
         }
       ]
     }
-  ]
+  ],
+  "systemPrompt": {
+    "header": "You are Claude Code...",
+    "instructions": "You are OpenCode, the best coding agent...",
+    "provider": "Anthropic-specific prompt content...",
+    "environment": "Working directory: /path/to/project...",
+    "custom": [
+      "Content from CLAUDE.md",
+      "Content from AGENTS.md"
+    ],
+    "fullPrompt": "Complete combined system prompt..."
+  },
+  "tools": [
+    {
+      "id": "bash",
+      "description": "Executes a given bash command...",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The bash command to execute"
+          }
+        },
+        "required": ["command"]
+      }
+    },
+    {
+      "id": "read",
+      "description": "Reads a file from the local filesystem...",
+      "parameters": {
+        // ... 参数定义
+      }
+    }
+    // ... 所有可用工具
+  ],
+  "agentConfig": {
+    "name": "build",
+    "mode": "primary",
+    "model": {
+      "modelID": "claude-sonnet-4-5",
+      "providerID": "anthropic"
+    },
+    "temperature": 0.7,
+    "topP": 0.9,
+    "permission": {
+      // ... Agent 权限配置
+    },
+    "prompt": "Custom agent prompt if any..."
+  },
+  "modelConfig": {
+    "providerID": "anthropic",
+    "modelID": "claude-sonnet-4-5",
+    "baseURL": "https://api.anthropic.com/v1",
+    "options": {
+      "temperature": 0.7,
+      "maxTokens": 4096
+    }
+  },
+  "callChain": [
+    {
+      "messageID": "message_001",
+      "role": "user",
+      "timestamp": 1234567890,
+      "content": "User message content"
+    },
+    {
+      "messageID": "message_002",
+      "role": "assistant",
+      "timestamp": 1234567895,
+      "agent": "build",
+      "model": "claude-sonnet-4-5",
+      "toolCalls": [
+        {
+          "id": "call_001",
+          "tool": "bash",
+          "input": {
+            "command": "npm install"
+          },
+          "output": "Dependencies installed",
+          "status": "completed",
+          "duration": 3000
+        }
+      ],
+      "reasoning": "Let me install the dependencies...",
+      "response": "I've installed the dependencies."
+    }
+    // ... 完整的调用链
+  ],
+  "metadata": {
+    "exportVersion": "1.0",
+    "exportedAt": 1234567890,
+    "opencodeVersion": "1.0.0"
+  }
 }
 ```
 
@@ -83,6 +202,127 @@ opencode export <session-id> > session-export.json
 
 # 导出最新会话
 opencode export > latest-session.json
+```
+
+**增强导出功能 / Enhanced Export Features**:
+
+当前导出命令导出基本的会话信息和消息。为了获得完整的调用链路、系统提示词和工具定义，需要增强导出功能。
+
+The current export command exports basic session info and messages. To get the complete call chain, system prompts, and tool definitions, the export functionality needs enhancement.
+
+**建议的增强导出实现 / Recommended Enhanced Export Implementation**:
+
+```typescript
+// 增强的导出数据获取
+async function getEnhancedExportData(sessionID: string) {
+  const sessionInfo = await Session.get(sessionID)
+  const messages = await Session.messages({ sessionID })
+  
+  // 获取最后一条消息的模型和 agent 信息
+  const lastMessage = messages.filter(m => m.info.role === 'assistant').pop()
+  const modelID = lastMessage?.info.modelID || 'claude-sonnet-4-5'
+  const providerID = lastMessage?.info.providerID || 'anthropic'
+  const agentName = lastMessage?.info.agent || 'build'
+  
+  // 获取 agent 配置
+  const agent = await Agent.get(agentName)
+  
+  // 获取模型
+  const model = await Provider.getModel(providerID, modelID)
+  
+  // 获取系统提示词
+  const systemPromptParts = {
+    header: SystemPrompt.header(providerID),
+    instructions: SystemPrompt.instructions(),
+    provider: SystemPrompt.provider(model),
+    environment: await SystemPrompt.environment(),
+    custom: await SystemPrompt.custom()
+  }
+  
+  // 获取工具定义
+  const tools = await ToolRegistry.tools({ providerID, modelID }, agent)
+  
+  // 构建调用链
+  const callChain = messages.map(msg => ({
+    messageID: msg.info.id,
+    role: msg.info.role,
+    timestamp: msg.info.time.created,
+    agent: msg.info.role === 'assistant' ? msg.info.agent : undefined,
+    model: msg.info.role === 'assistant' ? msg.info.modelID : undefined,
+    toolCalls: msg.parts
+      .filter(p => p.type === 'tool')
+      .map(p => ({
+        id: p.id,
+        tool: p.tool,
+        input: p.state.input,
+        output: p.state.status === 'completed' ? p.state.output : undefined,
+        error: p.state.status === 'error' ? p.state.error : undefined,
+        status: p.state.status,
+        duration: p.state.time?.end && p.state.time?.start 
+          ? p.state.time.end - p.state.time.start 
+          : undefined
+      })),
+    reasoning: msg.parts
+      .filter(p => p.type === 'reasoning')
+      .map(p => p.text)
+      .join('\n'),
+    response: msg.parts
+      .filter(p => p.type === 'text')
+      .map(p => p.text)
+      .join('\n')
+  }))
+  
+  return {
+    info: sessionInfo,
+    messages: messages.map(msg => ({
+      info: msg.info,
+      parts: msg.parts
+    })),
+    systemPrompt: {
+      ...systemPromptParts,
+      fullPrompt: [
+        ...systemPromptParts.header,
+        systemPromptParts.instructions,
+        ...systemPromptParts.provider,
+        ...systemPromptParts.environment,
+        ...systemPromptParts.custom
+      ].join('\n\n')
+    },
+    tools: tools.map(t => ({
+      id: t.id,
+      description: t.description,
+      parameters: t.parameters
+    })),
+    agentConfig: agent,
+    modelConfig: {
+      providerID,
+      modelID,
+      options: model.options
+    },
+    callChain,
+    metadata: {
+      exportVersion: '1.0',
+      exportedAt: Date.now(),
+      opencodeVersion: process.env.npm_package_version || 'unknown'
+    }
+  }
+}
+```
+
+**实现位置 / Implementation Location**:
+建议在 `/packages/opencode/src/cli/cmd/export.ts` 中添加 `--enhanced` 或 `--full` 标志来启用完整导出。
+
+Recommended to add `--enhanced` or `--full` flag in `/packages/opencode/src/cli/cmd/export.ts` to enable complete export.
+
+**使用增强导出 / Using Enhanced Export**:
+
+```bash
+# 基本导出（当前功能）
+opencode export <session-id>
+
+# 完整导出（包含系统提示词、工具定义、调用链）
+opencode export --enhanced <session-id>
+opencode export --full <session-id>
 ```
 
 ---
@@ -933,6 +1173,236 @@ exportSessionAsMarkdown("session_abc123")
 
 ---
 
+## 实现增强导出功能指南 / Implementation Guide for Enhanced Export
+
+### 所需更改 / Required Changes
+
+要实现包含系统提示词、工具定义和完整调用链的增强导出功能，需要修改以下文件：
+
+To implement enhanced export with system prompts, tool definitions, and full call chain, the following files need to be modified:
+
+#### 1. 更新导出命令 / Update Export Command
+
+**文件 / File**: `/packages/opencode/src/cli/cmd/export.ts`
+
+**添加 --enhanced 标志 / Add --enhanced Flag**:
+
+```typescript
+import { Agent } from "../../agent/agent"
+import { Provider } from "../../provider/provider"
+import { SystemPrompt } from "../../session/system"
+import { ToolRegistry } from "../../tool/registry"
+
+export const ExportCommand = cmd({
+  command: "export [sessionID]",
+  describe: "export session data as JSON",
+  builder: (yargs: Argv) => {
+    return yargs
+      .positional("sessionID", {
+        describe: "session id to export",
+        type: "string",
+      })
+      .option("enhanced", {
+        describe: "include system prompts, tool definitions, and full call chain",
+        type: "boolean",
+        default: false,
+        alias: "e"
+      })
+      .option("full", {
+        describe: "alias for --enhanced",
+        type: "boolean",
+        default: false,
+        alias: "f"
+      })
+  },
+  handler: async (args) => {
+    const enhanced = args.enhanced || args.full
+    
+    // ... 现有的会话选择逻辑 ...
+    
+    try {
+      const sessionInfo = await Session.get(sessionID!)
+      const messages = await Session.messages({ sessionID: sessionID! })
+      
+      let exportData: any = {
+        info: sessionInfo,
+        messages: messages.map((msg) => ({
+          info: msg.info,
+          parts: msg.parts,
+        })),
+      }
+      
+      if (enhanced) {
+        // 获取最后一条助手消息以确定模型和 agent
+        const lastAssistantMsg = messages
+          .filter(m => m.info.role === 'assistant')
+          .pop()
+        
+        if (lastAssistantMsg) {
+          const modelID = lastAssistantMsg.info.modelID
+          const providerID = lastAssistantMsg.info.providerID
+          const agentName = lastAssistantMsg.info.agent || 'build'
+          
+          // 获取 agent 配置
+          const agent = await Agent.get(agentName)
+          
+          // 获取模型
+          const model = await Provider.getModel(providerID, modelID)
+          
+          // 获取系统提示词各部分
+          const systemPromptParts = {
+            header: SystemPrompt.header(providerID),
+            instructions: SystemPrompt.instructions(),
+            provider: SystemPrompt.provider(model),
+            environment: await SystemPrompt.environment(),
+            custom: await SystemPrompt.custom(),
+          }
+          
+          // 获取工具定义
+          const tools = await ToolRegistry.tools(
+            { providerID, modelID },
+            agent
+          )
+          
+          // 构建调用链
+          const callChain = messages.map(msg => ({
+            messageID: msg.info.id,
+            role: msg.info.role,
+            timestamp: msg.info.time?.created,
+            ...(msg.info.role === 'assistant' && {
+              agent: msg.info.agent,
+              model: msg.info.modelID,
+              provider: msg.info.providerID,
+              tokens: msg.info.tokens,
+              cost: msg.info.cost,
+            }),
+            toolCalls: msg.parts
+              .filter(p => p.type === 'tool')
+              .map(p => ({
+                id: p.id,
+                tool: p.tool,
+                callID: p.callID,
+                input: p.state.input,
+                output: p.state.status === 'completed' 
+                  ? p.state.output 
+                  : undefined,
+                error: p.state.status === 'error' 
+                  ? p.state.error 
+                  : undefined,
+                status: p.state.status,
+                title: p.state.status === 'completed'
+                  ? p.state.title
+                  : undefined,
+                duration: p.state.time?.end && p.state.time?.start
+                  ? p.state.time.end - p.state.time.start
+                  : undefined,
+              })),
+            reasoning: msg.parts
+              .filter(p => p.type === 'reasoning')
+              .map(p => p.text)
+              .join('\n'),
+            response: msg.parts
+              .filter(p => p.type === 'text' && !p.synthetic)
+              .map(p => p.text)
+              .join('\n'),
+          }))
+          
+          // 添加增强数据
+          exportData = {
+            ...exportData,
+            systemPrompt: {
+              ...systemPromptParts,
+              fullPrompt: [
+                ...systemPromptParts.header,
+                systemPromptParts.instructions,
+                ...systemPromptParts.provider,
+                ...systemPromptParts.environment,
+                ...systemPromptParts.custom,
+              ].filter(Boolean).join('\n\n'),
+            },
+            tools: tools.map(t => ({
+              id: t.id,
+              description: t.description,
+              parameters: t.parameters,
+            })),
+            agentConfig: agent,
+            modelConfig: {
+              providerID,
+              modelID,
+              api: model.api,
+              options: model.options,
+            },
+            callChain,
+            metadata: {
+              exportVersion: '1.0',
+              exportedAt: Date.now(),
+              opencodeVersion: Installation.version(),
+              enhanced: true,
+            },
+          }
+        }
+      } else {
+        // 基本导出添加元数据
+        exportData.metadata = {
+          exportVersion: '1.0',
+          exportedAt: Date.now(),
+          opencodeVersion: Installation.version(),
+          enhanced: false,
+        }
+      }
+      
+      process.stdout.write(JSON.stringify(exportData, null, 2))
+      process.stdout.write(EOL)
+    } catch (error) {
+      UI.error(`Session not found: ${sessionID!}`)
+      process.exit(1)
+    }
+  },
+})
+```
+
+#### 2. 使用示例 / Usage Examples
+
+```bash
+# 基本导出（仅会话信息和消息）
+opencode export session_abc123 > basic-export.json
+
+# 增强导出（包含所有系统细节）
+opencode export --enhanced session_abc123 > enhanced-export.json
+opencode export -e session_abc123 > enhanced-export.json
+
+# 使用 --full 别名
+opencode export --full session_abc123 > full-export.json
+opencode export -f session_abc123 > full-export.json
+```
+
+#### 3. 导出数据分析 / Export Data Analysis
+
+```bash
+# 查看系统提示词
+cat enhanced-export.json | jq '.systemPrompt.fullPrompt'
+
+# 查看所有工具定义
+cat enhanced-export.json | jq '.tools[] | {id, description}'
+
+# 查看调用链中的工具调用
+cat enhanced-export.json | jq '.callChain[] | select(.toolCalls | length > 0) | {messageID, toolCalls}'
+
+# 统计每个工具的使用次数
+cat enhanced-export.json | jq '[.callChain[].toolCalls[].tool] | group_by(.) | map({tool: .[0], count: length})'
+
+# 查看 agent 配置
+cat enhanced-export.json | jq '.agentConfig'
+
+# 查看模型配置
+cat enhanced-export.json | jq '.modelConfig'
+
+# 查看完整的调用链
+cat enhanced-export.json | jq '.callChain[] | {id: .messageID, role, agent, toolCount: (.toolCalls | length)}'
+```
+
+---
+
 ## 总结 / Summary
 
 ### 轨迹导出 / Trace Export
@@ -942,8 +1412,18 @@ OpenCode 提供三种主要的会话数据导出方式：
 OpenCode provides three main ways to export session data:
 
 1. **Export Command** - JSON 格式，完整数据，适合备份和分析
+   - **基本导出**: `opencode export` - 会话信息和消息
+   - **增强导出**: `opencode export --enhanced` - 包含系统提示词、工具定义、agent 配置、模型配置和完整调用链
 2. **Share Feature** - 在线分享，实时同步，适合协作
 3. **Transcript Format** - Markdown 格式，易读，适合人类查看
+
+**增强导出包含的额外信息 / Enhanced Export Additional Information**:
+- **系统提示词** (System Prompts) - 完整的系统提示词，包括 header、instructions、provider-specific、environment、custom
+- **工具定义** (Tool Definitions) - 所有可用工具的定义和参数
+- **Agent 配置** (Agent Config) - Agent 的完整配置（mode、model、temperature、permissions等）
+- **模型配置** (Model Config) - 提供商和模型的配置选项
+- **调用链** (Call Chain) - 结构化的消息流，包括工具调用详情、推理过程、响应内容
+- **元数据** (Metadata) - 导出版本、导出时间、OpenCode 版本
 
 ### 自定义模型 / Custom Models
 
