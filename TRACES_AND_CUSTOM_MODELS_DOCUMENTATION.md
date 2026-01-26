@@ -2037,6 +2037,363 @@ cat session.json | jq '[.callChain[] | select(.role == "assistant")] | group_by(
 
 ---
 
+## `opencode run` 会话导出和持久化 / Session Export and Persistence with `opencode run`
+
+### 问题 / The Problem
+
+当使用 `opencode run` 命令时，会话在命令结束后会被自动 dispose（销毁），导致无法使用 `opencode export` 导出会话数据。
+
+When using the `opencode run` command, sessions are automatically disposed after the command completes, making it impossible to use `opencode export` to export session data.
+
+**原因 / Root Cause**:
+
+```typescript
+// /packages/opencode/src/cli/bootstrap.ts
+export async function bootstrap<T>(directory: string, cb: () => Promise<T>) {
+  return Instance.provide({
+    directory,
+    init: InstanceBootstrap,
+    fn: async () => {
+      try {
+        const result = await cb()
+        return result
+      } finally {
+        await Instance.dispose()  // 自动清理实例
+      }
+    },
+  })
+}
+```
+
+`opencode run` 命令会在 bootstrap 函数的 finally 块中调用 `Instance.dispose()`，这会清理所有会话数据。
+
+The `opencode run` command calls `Instance.dispose()` in the finally block of the bootstrap function, which cleans up all session data.
+
+---
+
+### 解决方案 / Solutions
+
+#### 方案 1: 使用 `--attach` 连接到持久化服务器 / Use `--attach` with Persistent Server
+
+**推荐方案 / Recommended Approach**
+
+通过启动持久化的 OpenCode 服务器，可以保留会话数据供后续导出。
+
+By starting a persistent OpenCode server, you can preserve session data for later export.
+
+**步骤 / Steps**:
+
+```bash
+# 1. 在一个终端启动持久化服务器
+# Start a persistent server in one terminal
+opencode serve --port 4096
+
+# 或使用 web 命令（带 UI）
+# Or use web command (with UI)
+opencode web --port 4096
+
+# 2. 在另一个终端运行命令，连接到服务器
+# In another terminal, run commands attached to the server
+opencode run --attach http://localhost:4096 "Create a new React component"
+
+# 3. 命令完成后，导出会话
+# After completion, export the session
+opencode export --attach http://localhost:4096
+```
+
+**优点 / Advantages**:
+- ✅ 会话持久化，不会被自动销毁
+- ✅ 可以多次运行命令，累积会话历史
+- ✅ 避免每次运行的 MCP 服务器冷启动时间
+- ✅ 可以随时导出任何会话
+
+**配置服务器 / Server Configuration**:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "server": {
+    "port": 4096,
+    "hostname": "localhost",
+    "cors": ["http://localhost:*"]
+  }
+}
+```
+
+---
+
+#### 方案 2: 使用 `--session` 继续现有会话 / Use `--session` to Continue Existing Session
+
+如果已经有一个会话 ID，可以继续该会话而不是创建新会话。
+
+If you already have a session ID, you can continue that session instead of creating a new one.
+
+```bash
+# 1. 启动 TUI 并获取会话 ID
+# Start TUI and get session ID
+opencode
+
+# 2. 在 TUI 中查看会话 ID（通常显示在状态栏或使用 session_list 命令）
+# View session ID in TUI (usually shown in status bar or use session_list command)
+
+# 3. 使用该会话 ID 继续会话
+# Continue the session using that ID
+opencode run --session session_abc123 "Continue this task"
+
+# 4. 在 TUI 中会话仍然可见和可导出
+# The session is still visible and exportable in TUI
+```
+
+---
+
+#### 方案 3: 使用 `--share` 自动分享会话 / Use `--share` to Auto-Share Sessions
+
+虽然不能阻止本地会话的销毁，但可以将会话自动上传到云端保存。
+
+While you can't prevent local session disposal, you can automatically upload sessions to the cloud.
+
+```bash
+# 运行时自动分享
+# Auto-share during run
+opencode run --share "Explain async patterns"
+
+# 输出会包含分享 URL
+# Output will include share URL
+# ~  https://share.opencode.ai/abc123
+```
+
+**或使用环境变量 / Or Use Environment Variable**:
+
+```bash
+# 设置自动分享
+# Enable auto-sharing
+export OPENCODE_AUTO_SHARE=true
+
+opencode run "Explain closures"
+# 会自动分享并输出 URL
+# Will auto-share and output URL
+```
+
+**或在配置文件中 / Or in Configuration File**:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "auto"
+}
+```
+
+**分享的会话可以通过 URL 访问和导出 / Shared sessions can be accessed and exported via URL**:
+
+- 访问分享 URL 查看会话内容
+- 使用 OpenCode Web UI 查看和导出
+- 分享链接包含完整的会话历史
+
+---
+
+#### 方案 4: 实时导出（脚本方案）/ Real-time Export (Script Approach)
+
+创建一个包装脚本，在 `opencode run` 执行期间导出会话。
+
+Create a wrapper script that exports the session during `opencode run` execution.
+
+**Bash 脚本示例 / Bash Script Example**:
+
+```bash
+#!/bin/bash
+# save as: opencode-run-with-export.sh
+
+# 启动后台服务器
+opencode serve --port 4096 &
+SERVER_PID=$!
+
+# 等待服务器启动
+sleep 2
+
+# 运行命令并获取会话 ID
+SESSION_OUTPUT=$(opencode run --attach http://localhost:4096 --format json "$@" 2>&1)
+
+# 从输出中提取会话 ID（假设第一个 JSON 事件包含 sessionID）
+SESSION_ID=$(echo "$SESSION_OUTPUT" | head -1 | jq -r '.sessionID')
+
+# 导出会话
+if [ ! -z "$SESSION_ID" ]; then
+    echo "Exporting session: $SESSION_ID"
+    opencode export --attach http://localhost:4096 "$SESSION_ID" > "session-${SESSION_ID}.json"
+    echo "Session exported to session-${SESSION_ID}.json"
+fi
+
+# 清理
+kill $SERVER_PID
+
+# 显示原始输出
+echo "$SESSION_OUTPUT"
+```
+
+**使用 / Usage**:
+
+```bash
+chmod +x opencode-run-with-export.sh
+./opencode-run-with-export.sh "Create a Python script to parse JSON"
+```
+
+---
+
+#### 方案 5: 使用 TUI 而不是 run 命令 / Use TUI Instead of run Command
+
+最简单的方法是使用 TUI，它会持久化会话。
+
+The simplest approach is to use TUI, which persists sessions.
+
+```bash
+# 使用 TUI 并传入初始提示
+# Use TUI with initial prompt
+opencode --prompt "Explain async/await in JavaScript"
+
+# 或继续上一个会话
+# Or continue last session
+opencode --continue
+
+# 在 TUI 中完成后导出
+# Export from TUI after completion
+# 使用快捷键 <Leader>+x 或命令 /export
+# Use keybind <Leader>+x or command /export
+```
+
+---
+
+### 功能请求: 添加 `--export` 标志 / Feature Request: Add `--export` Flag
+
+**当前不支持 / Currently Not Supported**
+
+`opencode run` 命令目前没有 `--export` 标志来自动导出会话。这是一个潜在的功能增强。
+
+The `opencode run` command currently doesn't have an `--export` flag to automatically export sessions. This is a potential feature enhancement.
+
+**建议实现 / Suggested Implementation**:
+
+```bash
+# 理想的未来语法
+# Ideal future syntax
+opencode run --export session-export.json "Create a React component"
+
+# 或导出到标准输出
+# Or export to stdout
+opencode run --export - "Explain closures" > session.json
+```
+
+**当前替代方案 / Current Workaround**:
+
+使用方案 1（`--attach`）是最接近这个功能的现有方法。
+
+Using Solution 1 (`--attach`) is the closest existing approach to this functionality.
+
+---
+
+### 环境变量和标志 / Environment Variables and Flags
+
+**当前不存在阻止 disposal 的标志 / No Flag Currently Exists to Prevent Disposal**
+
+目前没有 `OPENCODE_KEEP_SESSION` 或 `OPENCODE_NO_DISPOSE` 这样的环境变量。
+
+There is currently no environment variable like `OPENCODE_KEEP_SESSION` or `OPENCODE_NO_DISPOSE`.
+
+**相关的现有标志 / Related Existing Flags**:
+
+```bash
+# 自动分享会话
+OPENCODE_AUTO_SHARE=true
+
+# 禁用自动压缩（可能有助于保留更多会话数据）
+OPENCODE_DISABLE_AUTOCOMPACT=true
+
+# 禁用会话清理
+OPENCODE_DISABLE_PRUNE=true
+```
+
+---
+
+### 最佳实践总结 / Best Practices Summary
+
+**1. 开发/调试场景 / Development/Debug Scenarios**:
+
+```bash
+# 启动持久化服务器
+opencode serve --port 4096
+
+# 在开发过程中运行多个命令
+opencode run --attach http://localhost:4096 "task 1"
+opencode run --attach http://localhost:4096 "task 2"
+
+# 随时导出任何会话
+opencode export --attach http://localhost:4096
+```
+
+**2. 自动化/CI 场景 / Automation/CI Scenarios**:
+
+```bash
+# 使用自动分享获取会话 URL
+OPENCODE_AUTO_SHARE=true opencode run "Run tests and fix failures"
+
+# 或使用脚本方案（方案 4）
+```
+
+**3. 快速一次性任务 / Quick One-off Tasks**:
+
+```bash
+# 使用 TUI，完成后手动导出
+opencode --prompt "Quick question"
+# 在 TUI 中使用 <Leader>+x 导出
+```
+
+**4. 需要详细审计追踪 / Requiring Detailed Audit Trail**:
+
+```bash
+# 组合使用分享和增强导出
+opencode run --share --attach http://localhost:4096 "Critical task"
+
+# 然后导出完整数据
+opencode export --enhanced session_id > full-audit.json
+```
+
+---
+
+### 配置示例 / Configuration Examples
+
+**完整的持久化工作流配置 / Complete Persistent Workflow Configuration**:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "auto",
+  "server": {
+    "port": 4096,
+    "hostname": "localhost",
+    "mdns": true
+  },
+  "keybinds": {
+    "session_export": "<leader>x"
+  }
+}
+```
+
+**使用脚本 / Using Scripts**:
+
+```bash
+# ~/.bashrc or ~/.zshrc
+alias ocrun='opencode run --attach http://localhost:4096'
+alias ocserve='opencode serve --port 4096 --daemon'
+alias ocexport='opencode export --attach http://localhost:4096'
+
+# 使用
+# Usage:
+ocserve              # 启动后台服务器
+ocrun "task here"    # 运行任务
+ocexport session_id  # 导出会话
+```
+
+---
+
 ## 总结 / Summary
 
 ### 轨迹导出 / Trace Export
