@@ -1403,6 +1403,640 @@ cat enhanced-export.json | jq '.callChain[] | {id: .messageID, role, agent, tool
 
 ---
 
+## 模型切换功能 / Model Switching Features
+
+OpenCode 支持在会话过程中手动切换模型，以及为不同的 agent 配置不同的模型，从而实现对复杂任务使用强模型、简单任务使用弱模型的策略。
+
+OpenCode supports manual model switching during sessions and configuring different models for different agents, enabling strategies like using stronger models for complex tasks and lighter models for simple tasks.
+
+### 1. 手动模型切换 / Manual Model Switching
+
+**位置 / Location**: `/packages/opencode/src/cli/cmd/tui/context/local.tsx`
+
+#### 切换方法 / Switching Methods
+
+OpenCode 提供多种手动切换模型的方式：
+
+OpenCode provides multiple ways to manually switch models:
+
+**方法 1: 模型列表对话框 / Model List Dialog**
+
+```bash
+# 快捷键（默认）
+<Leader>+m  # 打开模型选择对话框
+
+# 可配置的快捷键
+"model_list": "<leader>m"
+```
+
+- 交互式选择任何可用的模型
+- 显示提供商和模型名称
+- 选择后立即切换
+
+**方法 2: 最近使用的模型循环 / Recent Models Cycling**
+
+```bash
+# 快捷键（默认）
+F2              # 向前循环最近使用的模型
+Shift+F2        # 向后循环最近使用的模型
+
+# 可配置的快捷键
+"model_cycle_recent": "f2"
+"model_cycle_recent_reverse": "shift+f2"
+```
+
+- 在最近使用的 10 个模型之间循环
+- 保持最近使用历史
+
+**方法 3: 收藏模型循环 / Favorite Models Cycling**
+
+```bash
+# 可配置的快捷键（默认未设置）
+"model_cycle_favorite": "none"
+"model_cycle_favorite_reverse": "none"
+```
+
+- 仅在收藏的模型之间循环
+- 需要先标记收藏模型
+
+**方法 4: 模型变体切换 / Model Variant Switching**
+
+```bash
+# 快捷键（默认）
+Ctrl+T          # 循环当前模型的变体
+
+# 可配置的快捷键
+"variant_cycle": "ctrl+t"
+```
+
+- 在同一模型的不同变体之间切换
+- 例如：GPT-5 的 none/low/medium/high/xhigh 变体
+- 例如：Claude 的 high/max 思考预算变体
+
+#### 实现细节 / Implementation Details
+
+**本地状态管理 / Local State Management**:
+
+```typescript
+// 模型状态存储在本地
+const modelStore = {
+  ready: boolean,                  // 状态是否就绪
+  model: Record<string, {          // 每个 agent 的当前模型
+    providerID: string,
+    modelID: string
+  }>,
+  recent: Array<{                  // 最近使用的模型（最多 10 个）
+    providerID: string,
+    modelID: string
+  }>,
+  favorite: Array<{                // 收藏的模型
+    providerID: string,
+    modelID: string
+  }>,
+  variant: Record<string, string>  // 每个模型的当前变体
+}
+
+// 状态持久化到文件
+// 文件位置: ~/.local/share/opencode/model.json
+```
+
+**模型切换函数 / Model Switching Functions**:
+
+```typescript
+// 设置模型
+model.set(
+  { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
+  { recent: true }  // 添加到最近使用列表
+)
+
+// 循环最近使用的模型
+model.cycle(1)   // 向前
+model.cycle(-1)  // 向后
+
+// 循环收藏模型
+model.cycleFavorite(1)   // 向前
+model.cycleFavorite(-1)  // 向后
+
+// 切换变体
+model.variant.cycle()            // 循环变体
+model.variant.set("high")        // 设置特定变体
+model.variant.current()          // 获取当前变体
+model.variant.list()             // 获取所有可用变体
+```
+
+---
+
+### 2. Agent 特定模型配置 / Agent-Specific Model Configuration
+
+**配置位置 / Configuration Location**: `opencode.json`
+
+OpenCode 允许为每个 agent 配置不同的模型，这是实现"复杂任务用强模型、简单任务用弱模型"策略的关键。
+
+OpenCode allows configuring different models for each agent, which is key to implementing the "strong model for complex tasks, light model for simple tasks" strategy.
+
+#### 配置示例 / Configuration Examples
+
+**示例 1: Build 和 Plan 使用不同模型 / Build and Plan with Different Models**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "description": "Full-featured build agent for complex tasks",
+      "model": "anthropic/claude-sonnet-4-5",  // 强模型用于实现
+      "mode": "primary"
+    },
+    "plan": {
+      "description": "Planning agent for analysis",
+      "model": "anthropic/claude-haiku-4-5",   // 弱模型用于规划
+      "mode": "primary"
+    }
+  }
+}
+```
+
+**示例 2: 多个专门 Agent / Multiple Specialized Agents**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "description": "Complex implementation tasks",
+      "model": "opencode/gpt-5.1-codex",      // 最强模型
+      "mode": "primary"
+    },
+    "plan": {
+      "description": "Planning and analysis",
+      "model": "anthropic/claude-haiku-4-5",  // 快速轻量模型
+      "mode": "primary"
+    },
+    "code-review": {
+      "description": "Code review and suggestions",
+      "model": "anthropic/claude-sonnet-4-5", // 中等模型
+      "mode": "subagent"
+    },
+    "quick-fix": {
+      "description": "Simple bug fixes",
+      "model": "anthropic/claude-haiku-4-5",  // 轻量快速模型
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+**示例 3: 本地和云端混合 / Local and Cloud Hybrid**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local-llm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local LLM",
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "apiKey": "not-needed"
+      },
+      "models": {
+        "qwen-coder": {
+          "name": "Qwen 2.5 Coder 32B"
+        }
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "model": "opencode/gpt-5.1-codex",      // 云端强模型用于复杂任务
+      "mode": "primary"
+    },
+    "explore": {
+      "model": "local-llm/qwen-coder",        // 本地模型用于简单探索
+      "mode": "subagent"
+    },
+    "quick-helper": {
+      "description": "Quick local assistance",
+      "model": "local-llm/qwen-coder",        // 本地模型降低成本
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+#### Agent 模型继承规则 / Agent Model Inheritance Rules
+
+OpenCode 使用以下优先级确定 agent 使用的模型：
+
+OpenCode uses the following priority to determine the model used by an agent:
+
+1. **Agent 特定配置** - Agent 配置中的 `model` 字段（最高优先级）
+2. **全局配置** - `opencode.json` 中的 `model` 字段（仅 primary agents）
+3. **父 Agent 模型** - 调用 subagent 的 primary agent 的模型（仅 subagents）
+4. **最近使用** - 用户最近使用的模型
+5. **默认模型** - 提供商的默认模型
+
+**代码实现 / Code Implementation**:
+
+```typescript
+// 来自 /packages/opencode/src/cli/cmd/tui/context/local.tsx
+const currentModel = createMemo(() => {
+  const a = agent.current()
+  return (
+    getFirstValidModel(
+      () => modelStore.model[a.name],  // 用户为此 agent 选择的模型
+      () => a.model,                   // Agent 配置中的模型
+      fallbackModel,                   // 全局配置/最近使用/默认
+    ) ?? undefined
+  )
+})
+```
+
+---
+
+### 3. 使用场景和策略 / Use Cases and Strategies
+
+#### 场景 1: 成本优化 / Cost Optimization
+
+**策略 / Strategy**: 简单任务用便宜模型，复杂任务用昂贵模型
+
+```json
+{
+  "agent": {
+    "build": {
+      "model": "anthropic/claude-sonnet-4-5",  // $3/M tokens (中等成本)
+      "mode": "primary"
+    },
+    "explore": {
+      "model": "anthropic/claude-haiku-4-5",   // $0.25/M tokens (低成本)
+      "mode": "subagent"
+    },
+    "complex-solver": {
+      "description": "For very complex problems only",
+      "model": "opencode/gpt-5.1-codex",       // 高成本，仅手动调用
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+**使用方式 / Usage**:
+- 日常工作用 Build agent (中等成本)
+- 代码探索自动用 Explore subagent (低成本)
+- 遇到复杂问题时手动调用: `@complex-solver help me solve this difficult algorithm problem`
+
+#### 场景 2: 速度优化 / Speed Optimization
+
+**策略 / Strategy**: 快速响应用小模型，深度思考用大模型
+
+```json
+{
+  "agent": {
+    "quick": {
+      "description": "Quick responses",
+      "model": "anthropic/claude-haiku-4-5",  // 快速响应
+      "mode": "primary"
+    },
+    "deep": {
+      "description": "Deep thinking",
+      "model": "openai/gpt-5",                // 深度推理
+      "mode": "primary"
+    }
+  }
+}
+```
+
+**使用方式 / Usage**:
+- 使用 Tab 键在 quick 和 deep agent 之间切换
+- 快速查询用 quick
+- 复杂问题用 deep
+
+#### 场景 3: 任务特定模型 / Task-Specific Models
+
+**策略 / Strategy**: 不同任务类型用最适合的模型
+
+```json
+{
+  "agent": {
+    "build": {
+      "model": "opencode/gpt-5.1-codex",      // 最佳代码生成
+      "mode": "primary"
+    },
+    "documentation": {
+      "description": "Write documentation",
+      "model": "anthropic/claude-sonnet-4-5", // 最佳文档写作
+      "mode": "subagent"
+    },
+    "data-analysis": {
+      "description": "Analyze data",
+      "model": "openai/gpt-5",                // 最佳数据分析和推理
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+#### 场景 4: 模型变体策略 / Model Variant Strategy
+
+**策略 / Strategy**: 同一模型的不同推理强度
+
+```json
+{
+  "provider": {
+    "openai": {
+      "models": {
+        "gpt-5": {
+          "variants": {
+            "fast": {
+              "reasoningEffort": "low",
+              "textVerbosity": "low"
+            },
+            "balanced": {
+              "reasoningEffort": "medium",
+              "textVerbosity": "medium"
+            },
+            "deep": {
+              "reasoningEffort": "high",
+              "textVerbosity": "low"
+            }
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "model": "openai/gpt-5"
+    }
+  }
+}
+```
+
+**使用方式 / Usage**:
+- 使用 `Ctrl+T` 在 fast/balanced/deep 变体之间循环
+- 简单任务用 fast 变体（快速+便宜）
+- 复杂任务用 deep 变体（深度思考）
+
+---
+
+### 4. 自动模型选择（通过 Agent） / Automatic Model Selection (via Agents)
+
+虽然 OpenCode 本身不支持在单个 agent 内自动切换模型，但可以通过配置多个 agent 并使用 Task 工具来实现类似的自动切换效果。
+
+While OpenCode doesn't support automatic model switching within a single agent, you can achieve similar automatic switching by configuring multiple agents and using the Task tool.
+
+#### 实现方案 / Implementation Approach
+
+**配置多个专门的 Subagent / Configure Multiple Specialized Subagents**:
+
+```json
+{
+  "agent": {
+    "build": {
+      "description": "Main development agent",
+      "model": "anthropic/claude-sonnet-4-5",
+      "mode": "primary"
+    },
+    "quick-explorer": {
+      "description": "Fast file search and simple queries. Use for quick tasks.",
+      "model": "anthropic/claude-haiku-4-5",
+      "mode": "subagent"
+    },
+    "deep-solver": {
+      "description": "Complex problem solving requiring deep reasoning. Use for difficult tasks.",
+      "model": "openai/gpt-5",
+      "mode": "subagent"
+    },
+    "code-writer": {
+      "description": "Write code for complex features. Use for implementation tasks.",
+      "model": "opencode/gpt-5.1-codex",
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+**Primary Agent 会根据任务复杂度自动调用合适的 Subagent / Primary Agent Automatically Invokes Appropriate Subagent**:
+
+Build agent 的系统提示词中包含了 Task 工具的描述，它会根据 subagent 的 description 自动选择：
+
+The Build agent's system prompt includes Task tool descriptions, and it automatically selects based on subagent descriptions:
+
+- 简单查询 → 自动调用 `quick-explorer` (Haiku)
+- 复杂问题 → 自动调用 `deep-solver` (GPT-5)
+- 代码实现 → 自动调用 `code-writer` (Codex)
+
+**示例对话 / Example Conversation**:
+
+```
+User: Find all TypeScript files in the src directory
+Build: [自动调用 quick-explorer subagent 使用 Haiku 模型]
+
+User: Help me design a distributed caching system with consistency guarantees
+Build: [自动调用 deep-solver subagent 使用 GPT-5 模型]
+
+User: Implement a React component with complex state management
+Build: [自动调用 code-writer subagent 使用 Codex 模型]
+```
+
+---
+
+### 5. 手动模型切换工作流 / Manual Model Switching Workflow
+
+#### 工作流 1: 会话中切换 / Mid-Session Switching
+
+```bash
+1. 开始会话 (默认模型: claude-sonnet-4-5)
+   User: "Help me debug this issue"
+   
+2. 意识到需要更强的模型
+   按 <Leader>+m
+   选择 opencode/gpt-5.1-codex
+   
+3. 继续对话 (现在使用 GPT-5.1 Codex)
+   User: "Now implement the fix"
+   
+4. 完成后切回轻量模型节省成本
+   按 F2 循环回 claude-sonnet-4-5
+```
+
+#### 工作流 2: Agent 切换 / Agent Switching
+
+```bash
+1. 使用 Build agent 进行开发 (强模型)
+   
+2. 切换到 Plan agent 进行规划 (弱模型)
+   按 Tab 键
+   
+3. 规划完成后切回 Build agent
+   按 Tab 键
+```
+
+#### 工作流 3: 变体切换 / Variant Switching
+
+```bash
+1. 使用 GPT-5 默认变体
+   
+2. 遇到简单任务，切换到 fast 变体
+   按 Ctrl+T (循环到 fast)
+   
+3. 遇到复杂任务，切换到 deep 变体
+   按 Ctrl+T (循环到 deep)
+```
+
+---
+
+### 6. 最佳实践 / Best Practices
+
+#### 1. 为不同复杂度配置不同 Agent / Configure Different Agents for Different Complexities
+
+```json
+{
+  "agent": {
+    "build": {
+      "model": "anthropic/claude-sonnet-4-5",
+      "description": "General development",
+      "mode": "primary"
+    },
+    "plan": {
+      "model": "anthropic/claude-haiku-4-5",
+      "description": "Planning and analysis",
+      "mode": "primary"
+    }
+  }
+}
+```
+
+✅ **优点 / Advantages**:
+- 明确的任务分离
+- 自动使用合适的模型
+- 通过 Tab 键快速切换
+
+#### 2. 使用收藏模型快速访问常用模型 / Use Favorite Models for Quick Access
+
+在模型列表中标记常用模型为收藏，然后配置快捷键：
+
+Mark frequently used models as favorites in the model list, then configure keybinds:
+
+```json
+{
+  "keybinds": {
+    "model_cycle_favorite": "f3",
+    "model_cycle_favorite_reverse": "shift+f3"
+  }
+}
+```
+
+#### 3. 配置描述性的 Agent Description / Configure Descriptive Agent Descriptions
+
+```json
+{
+  "agent": {
+    "quick-helper": {
+      "description": "Fast responses for simple tasks like file search, quick questions",
+      "model": "anthropic/claude-haiku-4-5",
+      "mode": "subagent"
+    },
+    "architect": {
+      "description": "System design, architecture decisions, complex problem solving",
+      "model": "openai/gpt-5",
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+描述性的 description 帮助 primary agent 自动选择正确的 subagent。
+
+Descriptive descriptions help the primary agent automatically select the correct subagent.
+
+#### 4. 监控成本和使用 / Monitor Costs and Usage
+
+使用导出功能分析模型使用情况：
+
+Use export feature to analyze model usage:
+
+```bash
+# 导出会话
+opencode export --enhanced session_xxx > session.json
+
+# 分析模型使用
+cat session.json | jq '.callChain[] | select(.role == "assistant") | {model, tokens, cost}'
+
+# 统计每个模型的总成本
+cat session.json | jq '[.callChain[] | select(.role == "assistant")] | group_by(.model) | map({model: .[0].model, total_cost: map(.cost) | add})'
+```
+
+---
+
+### 7. 配置文件示例 / Configuration File Examples
+
+**完整示例: 多层次模型策略 / Complete Example: Multi-tier Model Strategy**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-5",
+  "keybinds": {
+    "variant_cycle": "ctrl+t",
+    "model_cycle_recent": "f2",
+    "model_cycle_recent_reverse": "shift+f2",
+    "model_cycle_favorite": "f3",
+    "agent_cycle": "tab"
+  },
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Main development agent for general tasks",
+      "model": "anthropic/claude-sonnet-4-5",
+      "mode": "primary"
+    },
+    "plan": {
+      "description": "Fast planning and analysis",
+      "model": "anthropic/claude-haiku-4-5",
+      "mode": "primary"
+    },
+    "explore": {
+      "description": "Quick file search and exploration",
+      "model": "anthropic/claude-haiku-4-5",
+      "mode": "subagent"
+    },
+    "architect": {
+      "description": "Complex system design and architecture. Use for difficult design decisions.",
+      "model": "openai/gpt-5",
+      "mode": "subagent"
+    },
+    "coder": {
+      "description": "Advanced code implementation. Use for complex coding tasks.",
+      "model": "opencode/gpt-5.1-codex",
+      "mode": "subagent"
+    }
+  }
+}
+```
+
+**使用此配置的工作流 / Workflow with This Configuration**:
+
+1. **日常开发** - 使用 Build agent (Sonnet, 中等成本)
+2. **快速规划** - Tab 切换到 Plan agent (Haiku, 低成本)
+3. **文件探索** - Build 自动调用 explore subagent (Haiku, 低成本)
+4. **复杂设计** - Build 自动调用 architect subagent (GPT-5, 高成本)
+5. **高级编码** - Build 自动调用 coder subagent (Codex, 高成本)
+6. **紧急强力模式** - F2 手动切换到 GPT-5 或 Codex
+
+---
+
 ## 总结 / Summary
 
 ### 轨迹导出 / Trace Export
