@@ -2394,6 +2394,573 @@ ocexport session_id  # 导出会话
 
 ---
 
+## 禁用默认提供商和免费模型 / Disabling Default Providers and Free Models
+
+### 问题 / The Problem
+
+OpenCode 默认会自动加载一些提供商，包括 `opencode` 提供商，它包含免费模型如 `opencode/big-pickle` 和 `opencode/gpt-5-nano`。有时您可能希望：
+
+OpenCode automatically loads certain providers by default, including the `opencode` provider which contains free models like `opencode/big-pickle` and `opencode/gpt-5-nano`. Sometimes you may want to:
+
+1. **完全使用自定义模型** - 只使用您在 `opencode.jsonc` 中定义的模型
+2. **避免意外使用免费模型** - 确保不会在无意中使用免费/测试模型
+3. **控制可用的提供商** - 明确指定哪些提供商可以使用
+
+### 解决方案 / Solutions
+
+OpenCode 提供两种配置选项来控制提供商加载：
+
+OpenCode provides two configuration options to control provider loading:
+
+---
+
+#### 方案 1: 使用 `disabled_providers` 禁用特定提供商 / Using `disabled_providers` to Disable Specific Providers
+
+**最直接的方法 / Most Direct Approach**
+
+如果您想禁用 `opencode` 提供商（包括所有免费模型），只需将其添加到 `disabled_providers` 列表：
+
+If you want to disable the `opencode` provider (including all free models), simply add it to the `disabled_providers` list:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+**禁用多个提供商 / Disable Multiple Providers**:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": ["opencode", "openrouter", "groq"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+---
+
+#### 方案 2: 使用 `enabled_providers` 白名单模式 / Using `enabled_providers` for Whitelist Mode
+
+**更严格的控制 / Stricter Control**
+
+如果设置了 `enabled_providers`，**只有**列表中的提供商会被启用，所有其他提供商都会被忽略：
+
+If `enabled_providers` is set, **ONLY** providers in the list will be enabled. All other providers will be ignored:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["anthropic", "openai"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      },
+      "models": {
+        "claude-sonnet-4-5": {}
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-5": {}
+      }
+    }
+  }
+}
+```
+
+这种方法的优点是明确性 - 您精确控制哪些提供商可用。
+
+The advantage of this approach is explicitness - you have precise control over which providers are available.
+
+---
+
+### 配置选项详解 / Configuration Options Explained
+
+#### `disabled_providers`
+
+**位置 / Location**: `/packages/opencode/src/config/config.ts:920`
+
+```typescript
+disabled_providers: z.array(z.string()).optional().describe("Disable providers that are loaded automatically")
+```
+
+**说明 / Description**:
+- 黑名单模式 / Blacklist mode
+- 列出要禁用的提供商 ID
+- 不影响其他提供商的加载
+- 与现有配置兼容
+
+**使用场景 / Use Cases**:
+- 禁用特定的免费/测试提供商
+- 暂时禁用某个提供商而不删除配置
+- 避免自动加载不需要的提供商
+
+---
+
+#### `enabled_providers`
+
+**位置 / Location**: `/packages/opencode/src/config/config.ts:921-924`
+
+```typescript
+enabled_providers: z
+  .array(z.string())
+  .optional()
+  .describe("When set, ONLY these providers will be enabled. All other providers will be ignored")
+```
+
+**说明 / Description**:
+- 白名单模式 / Whitelist mode
+- **仅**启用列表中的提供商
+- 覆盖所有其他提供商配置
+- 优先级高于 `disabled_providers`
+
+**使用场景 / Use Cases**:
+- 严格控制可用提供商
+- 企业环境中限制模型访问
+- 确保只使用批准的提供商
+
+---
+
+### 实现原理 / Implementation Details
+
+**代码位置 / Code Location**: `/packages/opencode/src/provider/provider.ts:676-689`
+
+```typescript
+const disabled = new Set(config.disabled_providers ?? [])
+const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
+
+function isProviderAllowed(providerID: string): boolean {
+  if (enabled && !enabled.has(providerID)) return false
+  if (disabled.has(providerID)) return false
+  return true
+}
+```
+
+**加载顺序 / Loading Order**:
+
+1. 从 models.dev 加载提供商数据库
+2. 应用 `enabled_providers` 白名单（如果设置）
+3. 应用 `disabled_providers` 黑名单
+4. 检查环境变量和认证
+5. 应用自定义加载器（包括 opencode 提供商的特殊逻辑）
+6. 最终验证 `isProviderAllowed()`
+
+**OpenCode 提供商的特殊逻辑 / Special Logic for OpenCode Provider**:
+
+位置 / Location: `/packages/opencode/src/provider/provider.ts:100-121`
+
+```typescript
+async opencode(input) {
+  const hasKey = await (async () => {
+    const env = Env.all()
+    if (input.env.some((item) => env[item])) return true
+    if (await Auth.get(input.id)) return true
+    const config = await Config.get()
+    if (config.provider?.["opencode"]?.options?.apiKey) return true
+    return false
+  })()
+
+  if (!hasKey) {
+    // 删除所有非免费模型
+    // Remove all non-free models
+    for (const [key, value] of Object.entries(input.models)) {
+      if (value.cost.input === 0) continue
+      delete input.models[key]
+    }
+  }
+
+  return {
+    autoload: Object.keys(input.models).length > 0,
+    options: hasKey ? {} : { apiKey: "public" },
+  }
+}
+```
+
+**关键点 / Key Points**:
+- 如果没有 API key，OpenCode 提供商只保留免费模型（cost.input === 0）
+- `autoload: true` 仅当有可用模型时
+- 但 `disabled_providers` 会在此之前阻止加载
+
+---
+
+### 完整配置示例 / Complete Configuration Examples
+
+#### 示例 1: 只使用 Anthropic / Only Use Anthropic
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": ["opencode"],
+  "model": "anthropic/claude-sonnet-4-5",
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      },
+      "models": {
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5"
+        },
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+#### 示例 2: 多提供商白名单 / Multiple Providers Whitelist
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["anthropic", "openai", "google"],
+  "model": "anthropic/claude-sonnet-4-5",
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    },
+    "google": {
+      "options": {
+        "apiKey": "${GOOGLE_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+---
+
+#### 示例 3: 本地模型 + 禁用云端免费模型 / Local Models + Disable Cloud Free Models
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": ["opencode"],
+  "model": "local-llm/qwen-coder-32b",
+  "provider": {
+    "local-llm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local LLM",
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "apiKey": "not-needed"
+      },
+      "models": {
+        "qwen-coder-32b": {
+          "name": "Qwen 2.5 Coder 32B"
+        }
+      }
+    },
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+---
+
+#### 示例 4: 企业环境严格控制 / Enterprise Strict Control
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["azure"],
+  "model": "azure/gpt-5",
+  "provider": {
+    "azure": {
+      "npm": "@ai-sdk/azure",
+      "options": {
+        "apiKey": "${AZURE_OPENAI_API_KEY}",
+        "baseURL": "https://your-resource.openai.azure.com"
+      },
+      "models": {
+        "gpt-5": {
+          "name": "GPT-5 (Azure)",
+          "id": "gpt-5-deployment-name"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+### 验证配置 / Verify Configuration
+
+#### 方法 1: 使用 `opencode models` 命令 / Use `opencode models` Command
+
+```bash
+# 列出所有可用模型
+opencode models
+
+# 检查特定提供商
+opencode models anthropic
+opencode models opencode  # 应该显示 "No models found" 如果已禁用
+```
+
+#### 方法 2: 在 TUI 中使用 `/models` 命令 / Use `/models` in TUI
+
+```bash
+opencode
+
+# 在 TUI 中
+/models
+
+# 检查是否只显示您配置的提供商
+```
+
+#### 方法 3: 检查日志 / Check Logs
+
+```bash
+# 启动 OpenCode 并查看日志
+opencode --log-level debug
+
+# 查找类似这样的日志行
+# [provider] found: anthropic
+# [provider] found: openai
+# 不应该看到 [provider] found: opencode
+```
+
+---
+
+### 故障排查 / Troubleshooting
+
+#### 问题 1: 配置后仍然看到 opencode 提供商 / Still Seeing OpenCode Provider After Configuration
+
+**可能原因 / Possible Causes**:
+
+1. **配置文件位置错误** - 确保配置文件在正确的位置
+
+```bash
+# 全局配置
+~/.config/opencode/opencode.json
+
+# 项目配置（优先级更高）
+/path/to/project/opencode.json
+/path/to/project/.opencode/opencode.json
+```
+
+2. **JSON 语法错误** - 检查 JSON 格式
+
+```bash
+# 使用 jq 验证 JSON
+jq . ~/.config/opencode/opencode.json
+
+# 或使用 bun
+bun --print JSON.parse(require("fs").readFileSync("opencode.json", "utf8"))
+```
+
+3. **配置未生效** - 重启 OpenCode
+
+```bash
+# 如果使用 serve 或 web 模式，需要重启服务器
+pkill -f "opencode serve"
+opencode serve
+
+# 或使用 TUI
+opencode
+```
+
+---
+
+#### 问题 2: 禁用后无法使用任何模型 / Cannot Use Any Models After Disabling
+
+**解决方案 / Solution**:
+
+确保至少配置了一个有效的提供商并且有 API key：
+
+Make sure at least one valid provider is configured with an API key:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "sk-ant-..."  // 确保有有效的 API key
+      }
+    }
+  }
+}
+```
+
+或使用环境变量：
+
+Or use environment variables:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+opencode
+```
+
+---
+
+#### 问题 3: enabled_providers 不起作用 / enabled_providers Not Working
+
+**检查清单 / Checklist**:
+
+1. 确保提供商 ID 拼写正确（区分大小写）
+2. 检查提供商是否在 models.dev 数据库中
+3. 验证配置语法
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["anthropic"],  // 正确的提供商 ID
+  // 不是 "enabled_provider"（单数）
+  "provider": {
+    "anthropic": {
+      // 配置必须存在
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+---
+
+### 环境变量方式 / Environment Variable Approach
+
+虽然没有专门的环境变量来禁用提供商，但可以通过不设置 API key 来防止提供商自动加载：
+
+While there's no specific environment variable to disable providers, you can prevent provider auto-loading by not setting API keys:
+
+```bash
+# 不设置 OpenCode API key
+unset OPENCODE_API_KEY
+
+# 只设置您想使用的提供商
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+```
+
+**注意 / Note**: 这不会完全禁用 OpenCode 提供商的免费模型，因为它们不需要 API key。使用配置文件中的 `disabled_providers` 是更可靠的方法。
+
+This won't completely disable the OpenCode provider's free models since they don't require an API key. Using `disabled_providers` in the config file is a more reliable approach.
+
+---
+
+### 优先级总结 / Priority Summary
+
+配置优先级从高到低：
+
+Configuration priority from highest to lowest:
+
+1. **`enabled_providers`** - 如果设置，只有这些提供商可用
+2. **`disabled_providers`** - 禁用特定提供商
+3. **提供商配置** - `config.provider` 中的显式配置
+4. **环境变量** - `PROVIDER_API_KEY` 环境变量
+5. **认证文件** - `~/.local/share/opencode/auth.json`
+6. **自动加载逻辑** - 提供商的 `autoload` 设置
+
+---
+
+### 最佳实践 / Best Practices
+
+#### 1. 明确声明提供商 / Explicitly Declare Providers
+
+```json
+{
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "anthropic": { /* config */ },
+    "openai": { /* config */ }
+  }
+}
+```
+
+✅ **推荐** - 清楚表明意图
+
+#### 2. 使用环境变量管理密钥 / Use Environment Variables for Keys
+
+```json
+{
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+✅ **推荐** - 安全且灵活
+
+#### 3. 为不同环境使用不同配置 / Use Different Configs for Different Environments
+
+```bash
+# 开发环境 - 使用免费模型测试
+# Development - use free models for testing
+cp opencode.dev.json opencode.json
+
+# 生产环境 - 只使用付费模型
+# Production - only use paid models
+cp opencode.prod.json opencode.json
+```
+
+#### 4. 文档化您的配置 / Document Your Configuration
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "// Note": "This config disables OpenCode free models",
+  "// Reason": "Production environment requires consistent paid models",
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+---
+
 ## 总结 / Summary
 
 ### 轨迹导出 / Trace Export
