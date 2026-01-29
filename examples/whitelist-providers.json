@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "// Description": "Example configuration using whitelist mode (enabled_providers)",
+  "// Usage": "Copy this to ~/.config/opencode/opencode.json or your project's opencode.json",
+  "// Note": "Only providers in enabled_providers list will be available",
+  
+  "enabled_providers": ["anthropic", "openai", "google"],
+  
+  "model": "anthropic/claude-sonnet-4-5",
+  
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    },
+    "google": {
+      "options": {
+        "apiKey": "${GOOGLE_API_KEY}"
+      }
+    }
+  }
+}

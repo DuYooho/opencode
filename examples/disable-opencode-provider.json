@@ -1,0 +1,35 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "// Description": "Example configuration to disable OpenCode provider and use only custom models",
+  "// Usage": "Copy this to ~/.config/opencode/opencode.json or your project's opencode.json",
+  
+  "disabled_providers": ["opencode"],
+  
+  "model": "anthropic/claude-sonnet-4-5",
+  
+  "provider": {
+    "anthropic": {
+      "options": {
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      },
+      "models": {
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5"
+        },
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5"
+        }
+      }
+    },
+    "openai": {
+      "options": {
+        "apiKey": "${OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-5": {
+          "name": "GPT-5"
+        }
+      }
+    }
+  }
+}
