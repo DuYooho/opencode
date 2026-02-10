@@ -28,9 +28,10 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 | Document | Description | 中文说明 |
 |----------|-------------|---------|
 | [MODEL_PROMPT_RENDERING.md](./MODEL_PROMPT_RENDERING.md) | **Comprehensive**: How different models render prompts | **完整版**：不同模型如何渲染提示词 |
-| [模型提示词渲染差异.md](./模型提示词渲染差异.md) | **Quick Reference**: Qwen3-coder vs Qwen3 analysis | **快速参考**：Qwen3-coder vs Qwen3 分析 |
+| [模型提示词渲染差异.md](./模型提示词渲染差异.md) | **Quick Reference**: Qwen3-coder vs Qwen3 prompt analysis | **快速参考**：Qwen3-coder vs Qwen3 提示词分析 |
 | [PROMPT_FLOW_DIAGRAM.md](./PROMPT_FLOW_DIAGRAM.md) | **Visual**: ASCII flow diagrams for prompt system | **可视化**：提示词系统 ASCII 流程图 |
-| [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) | **Tool Formats**: JSON vs XML tool rendering (Qwen3 vs Qwen3-coder) | **工具格式**：JSON vs XML 工具渲染（Qwen3 vs Qwen3-coder） |
+| [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) | **Comprehensive**: JSON vs XML tool formats | **完整版**：JSON vs XML 工具格式 |
+| [工具渲染格式差异.md](./工具渲染格式差异.md) | **Quick Reference**: Qwen3 (JSON) vs Qwen3-coder (XML) tool formats | **快速参考**：Qwen3 (JSON) vs Qwen3-coder (XML) 工具格式 |
 
 ### 📂 Examples / 示例
 
@@ -53,7 +54,7 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 → [模型提示词渲染差异.md](./模型提示词渲染差异.md) (Quick) / [MODEL_PROMPT_RENDERING.md](./MODEL_PROMPT_RENDERING.md) (Detailed)
 
 **Understand tool format differences (JSON vs XML)?** / **了解工具格式差异（JSON vs XML）？**
-→ [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md)
+→ [工具渲染格式差异.md](./工具渲染格式差异.md) (Quick) / [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) (Detailed)
 
 **Switch models mid-session?** / **会话中切换模型？**
 → [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) → Model Switching section
@@ -280,8 +281,11 @@ Added comprehensive documentation for model-specific prompt rendering:
 3. **PROMPT_FLOW_DIAGRAM.md** - Visual flow diagrams with ASCII art
    - 带 ASCII 艺术的可视化流程图
 
-4. **TOOL_RENDERING_FORMATS.md** - JSON vs XML tool format analysis
-   - JSON vs XML 工具格式分析
+4. **TOOL_RENDERING_FORMATS.md** - JSON vs XML tool format analysis (comprehensive)
+   - JSON vs XML 工具格式分析（完整版）
+
+5. **工具渲染格式差异.md** - Quick Chinese reference for tool formats
+   - 工具格式的快速中文参考
 
 Key findings documented:
 - Qwen3-coder and Qwen3 use identical prompts and parameters
