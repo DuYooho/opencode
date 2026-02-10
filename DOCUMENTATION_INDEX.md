@@ -23,13 +23,14 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 | [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) | Session export, custom models, model switching | 会话导出、自定义模型、模型切换 |
 | [如何禁用默认模型.md](./如何禁用默认模型.md) | Quick guide: disable default OpenCode models | 快速指南：禁用 OpenCode 默认模型 |
 
-### 🎨 Prompt Rendering & Differences / 提示词渲染与差异
+### 🎨 Prompt & Tool Rendering / 提示词与工具渲染
 
 | Document | Description | 中文说明 |
 |----------|-------------|---------|
 | [MODEL_PROMPT_RENDERING.md](./MODEL_PROMPT_RENDERING.md) | **Comprehensive**: How different models render prompts | **完整版**：不同模型如何渲染提示词 |
 | [模型提示词渲染差异.md](./模型提示词渲染差异.md) | **Quick Reference**: Qwen3-coder vs Qwen3 analysis | **快速参考**：Qwen3-coder vs Qwen3 分析 |
 | [PROMPT_FLOW_DIAGRAM.md](./PROMPT_FLOW_DIAGRAM.md) | **Visual**: ASCII flow diagrams for prompt system | **可视化**：提示词系统 ASCII 流程图 |
+| [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) | **Tool Formats**: JSON vs XML tool rendering (Qwen3 vs Qwen3-coder) | **工具格式**：JSON vs XML 工具渲染（Qwen3 vs Qwen3-coder） |
 
 ### 📂 Examples / 示例
 
@@ -50,6 +51,9 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 
 **Understand prompt differences between models?** / **了解不同模型的提示词差异？**
 → [模型提示词渲染差异.md](./模型提示词渲染差异.md) (Quick) / [MODEL_PROMPT_RENDERING.md](./MODEL_PROMPT_RENDERING.md) (Detailed)
+
+**Understand tool format differences (JSON vs XML)?** / **了解工具格式差异（JSON vs XML）？**
+→ [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md)
 
 **Switch models mid-session?** / **会话中切换模型？**
 → [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) → Model Switching section
@@ -87,6 +91,10 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 **Agent system** / **Agent 系统**
 → `/packages/opencode/src/agent/agent.ts`
 
+**Tool rendering (format selection)** / **工具渲染（格式选择）**
+→ `/packages/opencode/src/session/prompt.ts` (tool definition)
+→ `/packages/opencode/src/provider/sdk/openai-compatible/` (format implementation)
+
 ---
 
 ## 📊 Key Findings / 关键发现
@@ -112,6 +120,28 @@ From our analysis in [MODEL_PROMPT_RENDERING.md](./MODEL_PROMPT_RENDERING.md):
    - **Qwen 模型参数**：
    - Temperature: `0.55` (conservative)
    - TopP: `1` (full probability mass)
+
+### Tool Rendering Formats / 工具渲染格式
+
+From our analysis in [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md):
+
+根据 [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) 中的分析：
+
+1. **Qwen3-coder uses XML, Qwen3 uses JSON** for tool calls
+   - **Qwen3-coder 使用 XML，Qwen3 使用 JSON** 进行工具调用
+
+2. **Format determined by AI SDK**, not OpenCode configuration
+   - **格式由 AI SDK 决定**，而非 OpenCode 配置
+
+3. **Reasons for difference**:
+   - **差异原因**：
+   - Model training (Qwen3-coder optimized for XML tools)
+   - API implementation differences
+   - SDK provider logic
+   - Backward compatibility
+
+4. **Transparent to users** - OpenCode handles both formats automatically
+   - **对用户透明** - OpenCode 自动处理两种格式
 
 ### System Prompt Assembly Order / 系统提示词组装顺序
 
@@ -250,14 +280,21 @@ Added comprehensive documentation for model-specific prompt rendering:
 3. **PROMPT_FLOW_DIAGRAM.md** - Visual flow diagrams with ASCII art
    - 带 ASCII 艺术的可视化流程图
 
+4. **TOOL_RENDERING_FORMATS.md** - JSON vs XML tool format analysis
+   - JSON vs XML 工具格式分析
+
 Key findings documented:
 - Qwen3-coder and Qwen3 use identical prompts and parameters
 - Main differences between Claude (with TodoWrite) and others (without)
+- **Qwen3-coder uses XML format for tools, Qwen3 uses JSON format**
+- Tool format determined automatically by Vercel AI SDK
 - Complete customization guide for users
 
 记录的关键发现：
 - Qwen3-coder 和 Qwen3 使用相同的提示词和参数
 - Claude（带 TodoWrite）和其他模型（不带）的主要区别
+- **Qwen3-coder 使用 XML 格式的工具，Qwen3 使用 JSON 格式**
+- 工具格式由 Vercel AI SDK 自动确定
 - 用户的完整自定义指南
 
 ---
@@ -282,12 +319,13 @@ All documents are fully searchable. Use these keywords:
 所有文档都可以搜索。使用这些关键词：
 
 - **prompt**: System prompts, provider prompts, agent prompts
-- **tool**: Built-in tools, custom tools, tool creation
+- **tool**: Built-in tools, custom tools, tool creation, tool formats (JSON/XML)
 - **agent**: Primary agents, subagents, custom agents
 - **model**: Model selection, switching, parameters
 - **export**: Session export, traces, enhanced export
 - **qwen**: Qwen-specific documentation
 - **claude**: Claude-specific documentation
+- **json/xml**: Tool rendering formats
 
 ---
 
