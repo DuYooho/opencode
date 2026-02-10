@@ -33,6 +33,13 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 | [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) | **Comprehensive**: JSON vs XML tool formats | **完整版**：JSON vs XML 工具格式 |
 | [工具渲染格式差异.md](./工具渲染格式差异.md) | **Quick Reference**: Qwen3 (JSON) vs Qwen3-coder (XML) tool formats | **快速参考**：Qwen3 (JSON) vs Qwen3-coder (XML) 工具格式 |
 | [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) | **Complete Guide**: Tool execution lifecycle (definition → result) | **完整指南**：工具执行生命周期（定义 → 结果）|
+| [工具执行流程说明.md](./工具执行流程说明.md) | **Quick Reference**: How tool instructions are executed | **快速参考**：工具指令如何被执行 |
+
+### 🔗 Agent System / Agent 系统
+
+| Document | Description | 中文说明 |
+|----------|-------------|---------|
+| [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md) | **Complete Guide**: How context is shared between main agents and subagents | **完整指南**：主 agent 和 subagent 之间如何共享上下文 |
 
 ### 📂 Examples / 示例
 
@@ -58,7 +65,10 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 → [工具渲染格式差异.md](./工具渲染格式差异.md) (Quick) / [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) (Detailed)
 
 **Understand how tools are executed?** / **了解工具如何执行？**
-→ [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) (Complete lifecycle from definition to result)
+→ [工具执行流程说明.md](./工具执行流程说明.md) (Quick) / [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) (Detailed)
+
+**Understand agent-subagent context sharing?** / **了解 agent-subagent 上下文共享？**
+→ [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md)
 
 **Switch models mid-session?** / **会话中切换模型？**
 → [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) → Model Switching section
@@ -100,6 +110,8 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 
 **Agent system** / **Agent 系统**
 → `/packages/opencode/src/agent/agent.ts`
+→ `/packages/opencode/src/tool/task.ts` (task tool for subagent invocation)
+→ `/packages/opencode/src/session/index.ts` (session creation with parentID)
 
 **Tool rendering (format selection)** / **工具渲染（格式选择）**
 → `/packages/opencode/src/session/prompt.ts` (tool definition)
@@ -184,6 +196,44 @@ From our analysis in [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md):
    - Parallel tool calls
    - File attachments (images, PDFs)
    - Tool context with abort signals
+
+### Agent-Subagent Context Sharing / Agent-Subagent 上下文共享
+
+From our analysis in [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md):
+
+根据 [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md) 中的分析：
+
+1. **Subagents are isolated** - They don't see main agent's context automatically
+   - **Subagent 是隔离的** - 它们不会自动看到主 agent 的上下文
+
+2. **Context must be explicit** - Pass everything needed in the `prompt` parameter
+   - **上下文必须显式传递** - 在 `prompt` 参数中传递所需的一切
+
+3. **Session architecture**:
+   - **Session 架构**：
+   - Each subagent gets new session with `parentID` link
+   - Parent tracking doesn't share context - only for hierarchy
+   - Separate message histories for main and subagent sessions
+
+4. **One-way communication**:
+   - **单向通信**：
+   - Main agent → Subagent: Only prompt text
+   - Subagent → Main agent: Only final result text + metadata
+   - Subagent's tool calls are hidden from main agent
+
+5. **Context passing strategies**:
+   - **上下文传递策略**：
+   - Inline text (for small content)
+   - @file references (for large files)
+   - Structured data (JSON/tables)
+   - Session continuation (multi-step tasks with `session_id`)
+
+6. **Design benefits**:
+   - **设计优势**：
+   - Better performance (smaller context windows)
+   - Lower cost (fewer tokens per call)
+   - Clear security boundaries
+   - Task independence
 
 ### System Prompt Assembly Order / 系统提示词组装顺序
 
@@ -331,6 +381,12 @@ Added comprehensive documentation for model-specific prompt rendering and tool e
 6. **TOOL_EXECUTION_FLOW.md** - Complete tool execution pipeline documentation
    - 完整的工具执行管道文档
 
+7. **工具执行流程说明.md** - Quick Chinese reference for tool execution
+   - 工具执行流程的快速中文参考
+
+8. **AGENT_SUBAGENT_CONTEXT_SHARING.md** - Complete guide on agent-subagent context sharing
+   - Agent-Subagent 上下文共享的完整指南
+
 Key findings documented:
 - Qwen3-coder and Qwen3 use identical prompts and parameters
 - Main differences between Claude (with TodoWrite) and others (without)
@@ -338,15 +394,23 @@ Key findings documented:
 - Tool format determined automatically by Vercel AI SDK
 - **Complete tool execution lifecycle**: definition → registration → invocation → streaming → execution → result → iteration
 - Tool execution includes permission system, error handling, output truncation, and parallel calls
+- **Subagents are context-isolated** - They don't see main agent's context automatically
+- Context must be explicitly passed in task tool's `prompt` parameter
+- Main agent only sees final result from subagent, not internal tool calls
+- 5 context passing strategies: inline text, @file references, structured data, file URLs, session continuation
 - Complete customization guide for users
 
-记录的关键发现：
+记录的关键发现:
 - Qwen3-coder 和 Qwen3 使用相同的提示词和参数
 - Claude（带 TodoWrite）和其他模型（不带）的主要区别
 - **Qwen3-coder 使用 XML 格式的工具，Qwen3 使用 JSON 格式**
 - 工具格式由 Vercel AI SDK 自动确定
 - **完整的工具执行生命周期**：定义 → 注册 → 调用 → 流式传输 → 执行 → 结果 → 迭代
 - 工具执行包括权限系统、错误处理、输出截断和并行调用
+- **Subagent 是上下文隔离的** - 它们不会自动看到主 agent 的上下文
+- 上下文必须在 task 工具的 `prompt` 参数中显式传递
+- 主 agent 只看到 subagent 的最终结果，看不到内部工具调用
+- 5 种上下文传递策略：内联文本、@file 引用、结构化数据、文件 URL、session 继续
 - 用户的完整自定义指南
 
 ---
