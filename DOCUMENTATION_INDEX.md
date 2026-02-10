@@ -40,6 +40,7 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 | Document | Description | 中文说明 |
 |----------|-------------|---------|
 | [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md) | **Complete Guide**: How context is shared between main agents and subagents | **完整指南**：主 agent 和 subagent 之间如何共享上下文 |
+| [COMPLETE_CALL_CHAIN_EXPORT.md](./COMPLETE_CALL_CHAIN_EXPORT.md) | **Complete Guide**: Export full call chain including subagents | **完整指南**：导出包含子代理的完整调用链路 |
 
 ### 📂 Examples / 示例
 
@@ -69,6 +70,9 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 
 **Understand agent-subagent context sharing?** / **了解 agent-subagent 上下文共享？**
 → [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEXT_SHARING.md)
+
+**Export complete call chain with subagents?** / **导出包含子代理的完整调用链路？**
+→ [COMPLETE_CALL_CHAIN_EXPORT.md](./COMPLETE_CALL_CHAIN_EXPORT.md)
 
 **Switch models mid-session?** / **会话中切换模型？**
 → [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) → Model Switching section
@@ -235,6 +239,37 @@ From our analysis in [AGENT_SUBAGENT_CONTEXT_SHARING.md](./AGENT_SUBAGENT_CONTEX
    - Clear security boundaries
    - Task independence
 
+### Complete Call Chain Export / 完整调用链路导出
+
+From our analysis in [COMPLETE_CALL_CHAIN_EXPORT.md](./COMPLETE_CALL_CHAIN_EXPORT.md):
+
+根据 [COMPLETE_CALL_CHAIN_EXPORT.md](./COMPLETE_CALL_CHAIN_EXPORT.md) 中的分析：
+
+1. **Problem**: `--print-logs` only shows main agent, not subagent calls
+   - **问题**：`--print-logs` 只显示主 agent，不包含 subagent 调用
+
+2. **Session hierarchy tracking** via `parentID` field
+   - **会话层次追踪**：通过 `parentID` 字段
+
+3. **Solutions available**:
+   - **可用解决方案**：
+   - Recursive export script (recommended, immediate use)
+   - Enhanced export command with `--recursive` flag (feature request)
+   - Real-time log aggregation (advanced)
+   - Post-execution hierarchy analysis (quick overview)
+
+4. **API for child sessions**:
+   - **子会话 API**：
+   - `Session.children(parentID)` - Get all child sessions
+   - Recursive traversal needed for full hierarchy
+
+5. **Export includes**:
+   - **导出包含**：
+   - Session info (title, timestamps, parentID)
+   - Complete message history
+   - Tool calls with inputs/outputs
+   - Nested child sessions (recursive)
+
 ### System Prompt Assembly Order / 系统提示词组装顺序
 
 1. **Header** (Anthropic only)
@@ -387,6 +422,9 @@ Added comprehensive documentation for model-specific prompt rendering and tool e
 8. **AGENT_SUBAGENT_CONTEXT_SHARING.md** - Complete guide on agent-subagent context sharing
    - Agent-Subagent 上下文共享的完整指南
 
+9. **COMPLETE_CALL_CHAIN_EXPORT.md** - Complete guide on exporting full call chain with subagents
+   - 导出包含子代理的完整调用链路的完整指南
+
 Key findings documented:
 - Qwen3-coder and Qwen3 use identical prompts and parameters
 - Main differences between Claude (with TodoWrite) and others (without)
@@ -398,6 +436,10 @@ Key findings documented:
 - Context must be explicitly passed in task tool's `prompt` parameter
 - Main agent only sees final result from subagent, not internal tool calls
 - 5 context passing strategies: inline text, @file references, structured data, file URLs, session continuation
+- **`--print-logs` limitation**: Only shows main agent, not subagent calls
+- **Session hierarchy via `parentID`**: Child sessions linked but context isolated
+- **4 solutions for complete call chain**: Recursive export script, enhanced export command, real-time aggregation, hierarchy analysis
+- `Session.children(parentID)` API available for traversing session hierarchy
 - Complete customization guide for users
 
 记录的关键发现:
@@ -411,6 +453,10 @@ Key findings documented:
 - 上下文必须在 task 工具的 `prompt` 参数中显式传递
 - 主 agent 只看到 subagent 的最终结果，看不到内部工具调用
 - 5 种上下文传递策略：内联文本、@file 引用、结构化数据、文件 URL、session 继续
+- **`--print-logs` 限制**：只显示主 agent，不包含 subagent 调用
+- **通过 `parentID` 的会话层次**：子会话链接但上下文隔离
+- **完整调用链路的 4 种解决方案**：递归导出脚本、增强导出命令、实时聚合、层次分析
+- `Session.children(parentID)` API 可用于遍历会话层次
 - 用户的完整自定义指南
 
 ---
