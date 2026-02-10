@@ -32,6 +32,7 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 | [PROMPT_FLOW_DIAGRAM.md](./PROMPT_FLOW_DIAGRAM.md) | **Visual**: ASCII flow diagrams for prompt system | **可视化**：提示词系统 ASCII 流程图 |
 | [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) | **Comprehensive**: JSON vs XML tool formats | **完整版**：JSON vs XML 工具格式 |
 | [工具渲染格式差异.md](./工具渲染格式差异.md) | **Quick Reference**: Qwen3 (JSON) vs Qwen3-coder (XML) tool formats | **快速参考**：Qwen3 (JSON) vs Qwen3-coder (XML) 工具格式 |
+| [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) | **Complete Guide**: Tool execution lifecycle (definition → result) | **完整指南**：工具执行生命周期（定义 → 结果）|
 
 ### 📂 Examples / 示例
 
@@ -55,6 +56,9 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 
 **Understand tool format differences (JSON vs XML)?** / **了解工具格式差异（JSON vs XML）？**
 → [工具渲染格式差异.md](./工具渲染格式差异.md) (Quick) / [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md) (Detailed)
+
+**Understand how tools are executed?** / **了解工具如何执行？**
+→ [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) (Complete lifecycle from definition to result)
 
 **Switch models mid-session?** / **会话中切换模型？**
 → [TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md](./TRACES_AND_CUSTOM_MODELS_DOCUMENTATION.md) → Model Switching section
@@ -88,6 +92,11 @@ This repository contains comprehensive documentation for OpenCode's internal sys
 
 **Tool definitions** / **工具定义**
 → `/packages/opencode/src/tool/`
+
+**Tool execution pipeline** / **工具执行管道**
+→ `/packages/opencode/src/session/processor.ts` (lifecycle management)
+→ `/packages/opencode/src/tool/tool.ts` (Tool.define interface)
+→ `/packages/opencode/src/tool/registry.ts` (registration)
 
 **Agent system** / **Agent 系统**
 → `/packages/opencode/src/agent/agent.ts`
@@ -143,6 +152,38 @@ From our analysis in [TOOL_RENDERING_FORMATS.md](./TOOL_RENDERING_FORMATS.md):
 
 4. **Transparent to users** - OpenCode handles both formats automatically
    - **对用户透明** - OpenCode 自动处理两种格式
+
+### Tool Execution Flow / 工具执行流程
+
+From our analysis in [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md):
+
+根据 [TOOL_EXECUTION_FLOW.md](./TOOL_EXECUTION_FLOW.md) 中的分析：
+
+1. **Complete 7-step pipeline**:
+   - **完整的 7 步管道**：
+   - Tool Definition → Registration → Model Invocation → AI SDK Streaming → Tool Execution → Result Processing → Iteration
+
+2. **Tool lifecycle states**:
+   - **工具生命周期状态**：
+   - `pending` (AI generating call) → `running` (executing) → `completed`/`error`
+
+3. **Permission system integration**:
+   - **权限系统集成**：
+   - Every tool can request user permission before execution
+   - Supports always-allow, always-deny, and ask-user patterns
+
+4. **Error handling**:
+   - **错误处理**：
+   - Parameter validation (Zod schemas)
+   - Execution error capture and retry
+   - AI SDK automatic repair for common issues
+
+5. **Advanced features**:
+   - **高级功能**：
+   - Output truncation (10K lines / 100KB)
+   - Parallel tool calls
+   - File attachments (images, PDFs)
+   - Tool context with abort signals
 
 ### System Prompt Assembly Order / 系统提示词组装顺序
 
@@ -268,9 +309,9 @@ These documents use diagrams for easy understanding:
 
 ### 2026-02-10
 
-Added comprehensive documentation for model-specific prompt rendering:
+Added comprehensive documentation for model-specific prompt rendering and tool execution:
 
-新增模型特定提示词渲染的完整文档：
+新增模型特定提示词渲染和工具执行的完整文档：
 
 1. **MODEL_PROMPT_RENDERING.md** - Complete analysis of how different models render prompts
    - 不同模型如何渲染提示词的完整分析
@@ -287,11 +328,16 @@ Added comprehensive documentation for model-specific prompt rendering:
 5. **工具渲染格式差异.md** - Quick Chinese reference for tool formats
    - 工具格式的快速中文参考
 
+6. **TOOL_EXECUTION_FLOW.md** - Complete tool execution pipeline documentation
+   - 完整的工具执行管道文档
+
 Key findings documented:
 - Qwen3-coder and Qwen3 use identical prompts and parameters
 - Main differences between Claude (with TodoWrite) and others (without)
 - **Qwen3-coder uses XML format for tools, Qwen3 uses JSON format**
 - Tool format determined automatically by Vercel AI SDK
+- **Complete tool execution lifecycle**: definition → registration → invocation → streaming → execution → result → iteration
+- Tool execution includes permission system, error handling, output truncation, and parallel calls
 - Complete customization guide for users
 
 记录的关键发现：
@@ -299,6 +345,8 @@ Key findings documented:
 - Claude（带 TodoWrite）和其他模型（不带）的主要区别
 - **Qwen3-coder 使用 XML 格式的工具，Qwen3 使用 JSON 格式**
 - 工具格式由 Vercel AI SDK 自动确定
+- **完整的工具执行生命周期**：定义 → 注册 → 调用 → 流式传输 → 执行 → 结果 → 迭代
+- 工具执行包括权限系统、错误处理、输出截断和并行调用
 - 用户的完整自定义指南
 
 ---
