@@ -22,10 +22,21 @@ import { SystemPrompt } from "./system"
 import { Flag } from "@/flag/flag"
 import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
+import { Bus } from "@/bus"
+import { BusEvent } from "@/bus/bus-event"
+import z from "zod"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
   export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
+
+  export const SystemEvent = BusEvent.define(
+    "session.system",
+    z.object({
+      sessionID: z.string(),
+      system: z.string().array(),
+    }),
+  )
 
   export type StreamInput = {
     user: MessageV2.User
@@ -91,7 +102,8 @@ export namespace LLM {
       system.length = 0
       system.push(header, rest.join("\n"))
     }
-    l.debug("system", { system })
+    l.info("system", { system })
+    await Bus.publish(SystemEvent, { sessionID: input.sessionID, system })
 
     const variant =
       !input.small && input.model.variants && input.user.variant ? input.model.variants[input.user.variant] : {}

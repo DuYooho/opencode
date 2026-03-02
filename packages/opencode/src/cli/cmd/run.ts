@@ -516,6 +516,13 @@ export const RunCommand = cmd({
             }
           }
 
+          if (event.type === "session.system") {
+            if (event.properties.sessionID === sessionID) {
+              emit("system_prompt", { system: event.properties.system })
+            }
+            continue
+          }
+
           if (event.type === "session.error") {
             const props = event.properties
             if (props.sessionID !== sessionID || !props.error) continue

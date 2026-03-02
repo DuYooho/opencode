@@ -596,6 +596,14 @@ export type EventSessionError = {
   }
 }
 
+export type EventSessionSystem = {
+  type: "session.system"
+  properties: {
+    sessionID: string
+    system: Array<string>
+  }
+}
+
 export type EventFileWatcherUpdated = {
   type: "file.watcher.updated"
   properties: {
@@ -724,6 +732,7 @@ export type Event =
   | EventSessionDeleted
   | EventSessionDiff
   | EventSessionError
+  | EventSessionSystem
   | EventFileWatcherUpdated
   | EventVcsBranchUpdated
   | EventTuiPromptAppend

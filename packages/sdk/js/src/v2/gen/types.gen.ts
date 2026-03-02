@@ -881,6 +881,14 @@ export type EventSessionError = {
   }
 }
 
+export type EventSessionSystem = {
+  type: "session.system"
+  properties: {
+    sessionID: string
+    system: Array<string>
+  }
+}
+
 export type EventVcsBranchUpdated = {
   type: "vcs.branch.updated"
   properties: {
@@ -993,6 +1001,7 @@ export type Event =
   | EventSessionDeleted
   | EventSessionDiff
   | EventSessionError
+  | EventSessionSystem
   | EventVcsBranchUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
