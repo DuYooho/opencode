@@ -91,6 +91,7 @@ export namespace LLM {
       system.length = 0
       system.push(header, rest.join("\n"))
     }
+    l.debug("system", { system })
 
     const variant =
       !input.small && input.model.variants && input.user.variant ? input.model.variants[input.user.variant] : {}
