@@ -1,0 +1,269 @@
+---
+title: Context Compaction
+description: How OpenCode manages context windows to enable unlimited-length conversations.
+---
+
+OpenCode uses a multi-layer context compaction system to keep conversations within model context
+limits. This allows you to have long-running sessions without worrying about exceeding the
+context window.
+
+---
+
+## Overview
+
+Every LLM has a finite context window. As conversations grow, the total tokens can exceed this
+limit. OpenCode addresses this with three layers of defense, applied in this order:
+
+1. **Truncation** — individual tool outputs are capped before they enter the conversation.
+2. **Pruning** — old tool results are cleared from history to reclaim tokens.
+3. **AI Summarization** — the conversation is summarized by a dedicated compaction agent and
+   the session continues from the summary.
+
+---
+
+## Truncation
+
+When a tool produces output, it passes through the truncation layer before being stored.
+
+| Setting      | Default |
+|--------------|---------|
+| `MAX_LINES`  | 2,000   |
+| `MAX_BYTES`  | 50 KB   |
+
+If the output exceeds either limit, it is trimmed and the full content is saved to a temporary
+file. The truncated message includes the file path so you can access the full output using
+tools like `Read` or `Grep`.
+
+Truncated output files are automatically cleaned up after **7 days**.
+
+**Source**: `packages/opencode/src/tool/truncation.ts`
+
+---
+
+## Pruning
+
+After each session turn completes, OpenCode scans older tool results and clears their output
+to reclaim tokens.
+
+The algorithm works backwards through the message history:
+
+1. Skip the most recent **2 turns** (to preserve immediate context).
+2. Skip any messages after a previous compaction summary.
+3. Accumulate token estimates for completed tool results.
+4. Once past a **40,000 token** protection window, mark older tool outputs for clearing.
+5. Only apply pruning if the total pruned tokens exceed **20,000** (to avoid thrashing).
+
+Pruned tool results display `[Old tool result content cleared]` in the conversation.
+
+Protected tools (like `skill`) are never pruned.
+
+| Constant          | Value   | Purpose                                            |
+|-------------------|---------|----------------------------------------------------|
+| `PRUNE_MINIMUM`   | 20,000  | Minimum tokens that must be prunable to take action |
+| `PRUNE_PROTECT`   | 40,000  | Recent history protection window                    |
+
+**Source**: `packages/opencode/src/session/compaction.ts` — `prune()`
+
+---
+
+## Overflow Detection
+
+Before summarization can happen, OpenCode needs to detect that the context is full. The
+`isOverflow()` function checks this after every model response.
+
+The formula depends on whether the model defines a separate input limit:
+
+- **With `limit.input`**: `usable = limit.input - reserved`
+- **Without `limit.input`**: `usable = context - maxOutputTokens`
+
+Where `reserved` defaults to `min(20,000, maxOutputTokens)` and can be configured via
+`compaction.reserved`.
+
+The total token count includes input tokens, output tokens, and cache tokens (both read and
+write). If the count exceeds `usable`, compaction is triggered.
+
+**Source**: `packages/opencode/src/session/compaction.ts` — `isOverflow()`
+
+---
+
+## AI Summarization
+
+When overflow is detected, OpenCode creates a compaction message and invokes a dedicated
+**compaction agent**. This agent reads the conversation history and produces a structured
+summary.
+
+### The Compaction Agent
+
+The compaction agent is defined in `packages/opencode/src/agent/agent.ts` with a system
+prompt in `packages/opencode/src/agent/prompt/compaction.txt`:
+
+> You are a helpful AI assistant tasked with summarizing conversations. When asked to
+> summarize, provide a detailed but concise summary of the conversation. Focus on information
+> that would be helpful for continuing the conversation.
+
+### Summary Template
+
+The summary follows this structure:
+
+```markdown
+## Goal
+[What goal(s) is the user trying to accomplish?]
+
+## Instructions
+- [Important instructions from the user]
+- [Plans or specs for continuation]
+
+## Discoveries
+[Notable things learned during the conversation]
+
+## Accomplished
+[What work has been completed, in progress, or remaining]
+
+## Relevant files / directories
+[Structured list of relevant files that were read, edited, or created]
+```
+
+### Replay Mechanism
+
+When compaction is triggered during an overflow (mid-conversation), OpenCode identifies the
+last user message that wasn't itself a compaction request. It then:
+
+1. Summarizes all messages **before** that point.
+2. **Replays** the user's message after the summary so the conversation can continue
+   seamlessly.
+
+If the conversation is too large even for the compaction model, an error is returned.
+
+**Source**: `packages/opencode/src/session/compaction.ts` — `process()`
+
+---
+
+## Context Filtering
+
+When building the message list for a new model call, OpenCode uses `filterCompacted()` to
+find the most recent compaction boundary. Messages before the last successful compaction
+summary are excluded, so the model only sees the summary plus subsequent messages.
+
+**Source**: `packages/opencode/src/session/message-v2.ts` — `filterCompacted()`
+
+---
+
+## Provider Error Detection
+
+OpenCode detects context overflow errors from **13+ LLM providers** using pattern matching on
+error messages. Recognized patterns include:
+
+| Provider             | Pattern                                      |
+|----------------------|----------------------------------------------|
+| Anthropic            | `prompt is too long`                         |
+| Amazon Bedrock       | `input is too long for requested model`      |
+| OpenAI               | `exceeds the context window`                 |
+| Google (Gemini)      | `input token count.*exceeds the maximum`     |
+| xAI (Grok)           | `maximum prompt length is \d+`               |
+| Groq                 | `reduce the length of the messages`          |
+| OpenRouter, DeepSeek | `maximum context length is \d+ tokens`       |
+| GitHub Copilot       | `exceeds the limit of \d+`                   |
+| llama.cpp            | `exceeds the available context size`         |
+| LM Studio            | `greater than the context length`            |
+| MiniMax              | `context window exceeds limit`               |
+| Moonshot / Kimi      | `exceeded model token limit`                 |
+| Generic              | `context_length_exceeded`                    |
+| HTTP                 | `request entity too large` (413)             |
+
+When a context overflow error is detected, it triggers automatic compaction instead of
+failing the session.
+
+**Source**: `packages/opencode/src/provider/error.ts`
+
+---
+
+## Processing Flow
+
+The complete flow lives in `packages/opencode/src/session/prompt.ts`:
+
+1. **Load messages** — filter to only messages after the last compaction boundary.
+2. **Check for pending compaction** — if a compaction part exists, run the summarization.
+3. **Check for overflow** — if the last assistant message's token count exceeds usable
+   context, create a compaction request.
+4. **Normal processing** — send messages to the model and stream the response.
+5. **Post-response check** — if the processor returns `"compact"`, create a compaction
+   request for the next iteration.
+6. **Prune** — after the session loop finishes, run pruning on old tool outputs.
+
+### Error-Triggered Compaction
+
+If the model returns a context overflow error during streaming, the processor catches it and
+sets `needsCompaction = true`. The session loop then creates a compaction request
+automatically.
+
+**Source**: `packages/opencode/src/session/processor.ts`
+
+---
+
+## Configuration
+
+Control compaction behavior through the `compaction` key in `opencode.json`:
+
+```json
+{
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
+  }
+}
+```
+
+| Option     | Type    | Default | Description                                                                 |
+|------------|---------|---------|-----------------------------------------------------------------------------|
+| `auto`     | boolean | `true`  | Automatically compact the session when context is full.                     |
+| `prune`    | boolean | `true`  | Remove old tool outputs to save tokens.                                     |
+| `reserved` | number  | —       | Token buffer for compaction. Defaults to `min(20000, maxOutputTokens)`.     |
+
+Setting `auto` to `false` disables automatic compaction entirely. You can still manually
+trigger compaction using the `/compact` command.
+
+Setting `prune` to `false` disables the pruning of old tool outputs.
+
+---
+
+## Plugin Hook
+
+Plugins can customize the compaction process using the
+`experimental.session.compacting` hook:
+
+```ts
+plugin.on("experimental.session.compacting", async (event, defaults) => {
+  return {
+    context: [...defaults.context, "Additional context for the summary"],
+    prompt: defaults.prompt, // or provide a custom prompt
+  }
+})
+```
+
+This allows plugins to inject additional context or replace the compaction prompt entirely.
+
+---
+
+## UI
+
+In the terminal UI, compacted messages display as **"History compacted"** (English) or
+**"历史已压缩"** (Chinese). The compaction status is visible in the message timeline.
+
+You can trigger manual compaction with the `/compact` command (`shift+c` keybind in TUI).
+
+---
+
+## Key Files
+
+| File | Description |
+|------|-------------|
+| `packages/opencode/src/session/compaction.ts` | Core compaction logic: overflow detection, pruning, AI summarization |
+| `packages/opencode/src/tool/truncation.ts` | Tool output truncation (2K lines / 50KB limit) |
+| `packages/opencode/src/provider/error.ts` | Provider-specific context overflow error detection |
+| `packages/opencode/src/session/processor.ts` | Session processor that detects overflow during streaming |
+| `packages/opencode/src/session/prompt.ts` | Session loop that orchestrates compaction triggers |
+| `packages/opencode/src/session/message-v2.ts` | Message types (`CompactionPart`, `ContextOverflowError`, `filterCompacted`) |
+| `packages/opencode/src/agent/prompt/compaction.txt` | System prompt for the compaction agent |
+| `packages/opencode/src/config/config.ts` | Configuration schema for compaction options |
+| `packages/opencode/test/session/compaction.test.ts` | Tests for overflow detection and token estimation |

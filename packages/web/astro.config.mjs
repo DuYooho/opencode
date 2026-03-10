@@ -174,6 +174,7 @@ export default defineConfig({
       sidebar: [
         "",
         "config",
+        "compaction",
         "providers",
         "network",
         "enterprise",

@@ -1,0 +1,253 @@
+---
+title: 上下文压缩
+description: OpenCode 如何管理上下文窗口以支持无限长度的对话。
+---
+
+OpenCode 使用多层上下文压缩系统来将对话保持在模型上下文限制之内。这使你可以进行长时间的会话，
+而无需担心超出上下文窗口。
+
+---
+
+## 概述
+
+每个大语言模型都有一个有限的上下文窗口。随着对话增长，总 token 数可能会超过此限制。OpenCode
+通过三层防护来解决这个问题，按以下顺序应用：
+
+1. **截断（Truncation）** — 在工具输出进入对话之前，对其进行大小限制。
+2. **修剪（Pruning）** — 清除历史中旧的工具结果以回收 token。
+3. **AI 摘要（Summarization）** — 由专用的压缩代理对对话进行摘要，会话从摘要处继续。
+
+---
+
+## 截断（Truncation）
+
+当工具产生输出时，会在存储之前通过截断层处理。
+
+| 设置         | 默认值   |
+|-------------|---------|
+| `MAX_LINES` | 2,000 行 |
+| `MAX_BYTES` | 50 KB   |
+
+如果输出超过任一限制，内容将被裁剪，完整内容保存到临时文件中。截断后的消息包含文件路径，
+你可以使用 `Read` 或 `Grep` 等工具访问完整输出。
+
+截断的输出文件会在 **7 天**后自动清理。
+
+**源码**：`packages/opencode/src/tool/truncation.ts`
+
+---
+
+## 修剪（Pruning）
+
+每次会话轮次完成后，OpenCode 会扫描旧的工具结果并清除其输出以回收 token。
+
+修剪算法从消息历史末尾向前扫描：
+
+1. 跳过最近的 **2 个轮次**（保留即时上下文）。
+2. 跳过上一次压缩摘要之后的所有消息。
+3. 累计已完成工具结果的 token 估算值。
+4. 超过 **40,000 token** 的保护窗口后，标记旧的工具输出进行清除。
+5. 只有当可修剪的 token 总量超过 **20,000** 时才执行修剪（避免频繁操作）。
+
+被修剪的工具结果在对话中显示为 `[Old tool result content cleared]`。
+
+受保护的工具（如 `skill`）永远不会被修剪。
+
+| 常量              | 值      | 用途                    |
+|-------------------|---------|------------------------|
+| `PRUNE_MINIMUM`   | 20,000  | 触发修剪的最小可修剪 token 数 |
+| `PRUNE_PROTECT`   | 40,000  | 近期历史保护窗口           |
+
+**源码**：`packages/opencode/src/session/compaction.ts` — `prune()`
+
+---
+
+## 溢出检测
+
+在摘要压缩发生之前，OpenCode 需要检测上下文是否已满。`isOverflow()` 函数在每次模型响应后
+进行检查。
+
+计算公式取决于模型是否定义了单独的输入限制：
+
+- **有 `limit.input`**：`usable = limit.input - reserved`
+- **无 `limit.input`**：`usable = context - maxOutputTokens`
+
+其中 `reserved` 默认为 `min(20,000, maxOutputTokens)`，可通过 `compaction.reserved`
+配置。
+
+总 token 计数包括输入 token、输出 token 和缓存 token（读取和写入）。如果计数超过 `usable`，
+则触发压缩。
+
+**源码**：`packages/opencode/src/session/compaction.ts` — `isOverflow()`
+
+---
+
+## AI 摘要
+
+当检测到溢出时，OpenCode 创建压缩消息并调用专用的 **压缩代理（compaction agent）**。
+该代理读取对话历史并生成结构化摘要。
+
+### 压缩代理
+
+压缩代理定义在 `packages/opencode/src/agent/agent.ts` 中，系统提示词位于
+`packages/opencode/src/agent/prompt/compaction.txt`：
+
+> 你是一个负责总结对话的 AI 助手。当被要求总结时，请提供详细但简洁的对话摘要。
+> 重点关注有助于继续对话的信息。
+
+### 摘要模板
+
+摘要遵循以下结构：
+
+```markdown
+## 目标
+[用户正在尝试完成什么目标？]
+
+## 指令
+- [用户给出的重要指令]
+- [用于继续工作的计划或规范]
+
+## 发现
+[对话过程中学到的重要内容]
+
+## 已完成
+[已完成、进行中和剩余的工作]
+
+## 相关文件/目录
+[被读取、编辑或创建的相关文件的结构化列表]
+```
+
+### 重放机制
+
+当压缩在溢出期间（对话进行中）被触发时，OpenCode 会找到最后一条不是压缩请求的用户消息。然后：
+
+1. 对该消息**之前**的所有消息进行摘要。
+2. 在摘要之后**重放**用户的消息，使对话可以无缝继续。
+
+如果对话对于压缩模型来说仍然太大，则返回错误。
+
+**源码**：`packages/opencode/src/session/compaction.ts` — `process()`
+
+---
+
+## 上下文过滤
+
+在为新的模型调用构建消息列表时，OpenCode 使用 `filterCompacted()` 找到最近的压缩边界。
+上一次成功压缩摘要之前的消息会被排除，因此模型只看到摘要加上后续消息。
+
+**源码**：`packages/opencode/src/session/message-v2.ts` — `filterCompacted()`
+
+---
+
+## 提供商错误检测
+
+OpenCode 通过模式匹配错误消息来检测来自 **13+ 个大语言模型提供商** 的上下文溢出错误。
+识别的模式包括：
+
+| 提供商               | 模式                                          |
+|---------------------|----------------------------------------------|
+| Anthropic           | `prompt is too long`                         |
+| Amazon Bedrock      | `input is too long for requested model`      |
+| OpenAI              | `exceeds the context window`                 |
+| Google (Gemini)     | `input token count.*exceeds the maximum`     |
+| xAI (Grok)          | `maximum prompt length is \d+`               |
+| Groq                | `reduce the length of the messages`          |
+| OpenRouter、DeepSeek | `maximum context length is \d+ tokens`       |
+| GitHub Copilot      | `exceeds the limit of \d+`                   |
+| llama.cpp           | `exceeds the available context size`         |
+| LM Studio           | `greater than the context length`            |
+| MiniMax             | `context window exceeds limit`               |
+| Moonshot / Kimi     | `exceeded model token limit`                 |
+| 通用                 | `context_length_exceeded`                    |
+| HTTP                | `request entity too large` (413)             |
+
+当检测到上下文溢出错误时，会触发自动压缩而不是使会话失败。
+
+**源码**：`packages/opencode/src/provider/error.ts`
+
+---
+
+## 处理流程
+
+完整流程位于 `packages/opencode/src/session/prompt.ts`：
+
+1. **加载消息** — 过滤到最后一次压缩边界之后的消息。
+2. **检查待处理的压缩** — 如果存在压缩部分，运行摘要。
+3. **检查溢出** — 如果最后一条助手消息的 token 计数超过可用上下文，创建压缩请求。
+4. **正常处理** — 将消息发送到模型并流式传输响应。
+5. **响应后检查** — 如果处理器返回 `"compact"`，为下一次迭代创建压缩请求。
+6. **修剪** — 会话循环结束后，对旧的工具输出运行修剪。
+
+### 错误触发的压缩
+
+如果模型在流式传输过程中返回上下文溢出错误，处理器会捕获它并设置 `needsCompaction = true`。
+然后会话循环自动创建压缩请求。
+
+**源码**：`packages/opencode/src/session/processor.ts`
+
+---
+
+## 配置
+
+通过 `opencode.json` 中的 `compaction` 键控制压缩行为：
+
+```json
+{
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
+  }
+}
+```
+
+| 选项       | 类型    | 默认值 | 说明                                                   |
+|-----------|---------|-------|-------------------------------------------------------|
+| `auto`    | boolean | `true` | 上下文满时自动压缩会话。                                   |
+| `prune`   | boolean | `true` | 移除旧的工具输出以节省 token。                              |
+| `reserved`| number  | —     | 压缩的 token 缓冲区。默认为 `min(20000, maxOutputTokens)`。 |
+
+将 `auto` 设置为 `false` 可完全禁用自动压缩。你仍然可以使用 `/compact` 命令手动触发压缩。
+
+将 `prune` 设置为 `false` 可禁用旧工具输出的修剪。
+
+---
+
+## 插件钩子
+
+插件可以使用 `experimental.session.compacting` 钩子来自定义压缩过程：
+
+```ts
+plugin.on("experimental.session.compacting", async (event, defaults) => {
+  return {
+    context: [...defaults.context, "摘要的附加上下文"],
+    prompt: defaults.prompt, // 或提供自定义提示词
+  }
+})
+```
+
+这允许插件注入额外的上下文或完全替换压缩提示词。
+
+---
+
+## 用户界面
+
+在终端 UI 中，压缩的消息显示为 **"历史已压缩"**。压缩状态在消息时间线中可见。
+
+你可以通过 `/compact` 命令（TUI 中的 `shift+c` 快捷键）手动触发压缩。
+
+---
+
+## 关键文件
+
+| 文件 | 说明 |
+|------|------|
+| `packages/opencode/src/session/compaction.ts` | 核心压缩逻辑：溢出检测、修剪、AI 摘要 |
+| `packages/opencode/src/tool/truncation.ts` | 工具输出截断（2K 行 / 50KB 限制） |
+| `packages/opencode/src/provider/error.ts` | 提供商特定的上下文溢出错误检测 |
+| `packages/opencode/src/session/processor.ts` | 流式传输期间检测溢出的会话处理器 |
+| `packages/opencode/src/session/prompt.ts` | 编排压缩触发的会话循环 |
+| `packages/opencode/src/session/message-v2.ts` | 消息类型（`CompactionPart`、`ContextOverflowError`、`filterCompacted`） |
+| `packages/opencode/src/agent/prompt/compaction.txt` | 压缩代理的系统提示词 |
+| `packages/opencode/src/config/config.ts` | 压缩选项的配置架构 |
+| `packages/opencode/test/session/compaction.test.ts` | 溢出检测和 token 估算的测试 |
